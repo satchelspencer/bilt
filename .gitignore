@@ -1,0 +1,4 @@
+node_modules/*
+test.js
+mod/*
+out.js
