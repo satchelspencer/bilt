@@ -18,6 +18,9 @@
     "underscore": "~1.8.3",
     "find-requires": "~0.2.2",
     "request": "~2.61.0",
-    "uglify-js": "~2.4.24"
+    "uglify-js": "~2.4.24",
+    "escodegen": "~1.7.0",
+    "esprima": "~2.6.0",
+    "esprima-walk": "~0.1.0"
   }
 }

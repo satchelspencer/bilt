@@ -4,8 +4,11 @@ var findRequires = require('find-requires');
 var request = require('request');
 var _ = require('underscore');
 var uglify = require('uglify-js');
+var esprima = require('esprima');
+var eswalk = require('esprima-walk');
+var escodegen = require('escodegen');
 
-var plugins = require('./plugins');
+var plugins = require('./lib/plugins');
 
 module.exports = function(config){	
 	function normalize(parent){
@@ -25,6 +28,11 @@ module.exports = function(config){
 			callback(e, body, true); //callback saying its remote
 		});
 		else fs.readFile(path, 'utf8', callback);
+	}
+	
+	function parse(js, transformer){
+		var parse = esprima.parse(js);
+		return escodegen.generate(transformer(parse));
 	}
 			
 	var api = {
@@ -64,22 +72,25 @@ module.exports = function(config){
 									});
 								}else cont();
 								function cont(){
-									var deps = findRequires(js);
-									/* replace all un normalized in the script */
-									_.each(deps, function(depPath){
-										var normalized = normalize(path)(depPath);
-										js = js.replace(new RegExp('(require\\([\'\"])('+depPath+')', 'g'), function(m, a){
-											return a+normalized;
-										});
-									});
 									var pathConfig = obj.pathsConfig[path]||{};
-									
 									pathConfig.remote = !!remote;
-									if(pathConfig && pathConfig.export){
+									var deps = pathConfig.deps||[];
+									if(pathConfig.export){ //nonstandard module
 										var e = obj.pathsConfig[path].export;
 										js = 'define((function(){'+js+'\nreturn '+e+'})());';
+									}else{
+										var normer = normalize(path);
+										js = parse(js, function(node){
+											eswalk(node, function(child){
+												if(child.type == 'CallExpression' && child.callee.name == 'require'){
+													var dep = child.arguments[0].value
+													deps.push(dep);
+													child.arguments[0].value = normer(dep);
+												}
+											});
+											return node;
+										});
 									}
-									if(pathConfig.deps) deps.push(pathConfig.deps);
 									obj.start(deps, each, function(e){
 										each(path, js, pathConfig, context);
 										pathDone(e);
@@ -95,13 +106,22 @@ module.exports = function(config){
 		modules : {},
 		build : function(paths, init, callback){
 			var build = "";
-			api.trace().start(paths, function(path, js, pathConfig, context){
-				if(!pathConfig.remote || pathConfig.include) js = js.replace('define(', 'define(\''+path+'\', ');
-				else js = 'load(\''+path+'\', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
-				build += js+'\n\n';
+			api.trace().start(paths, function(path, rawjs, pathConfig, context){				
+				if(!pathConfig.remote || pathConfig.include) build += parse(rawjs, function(node){
+					node.body = _.reduce(node.body, function(memo, statement){
+						if(statement.expression.type == 'CallExpression' && statement.expression.callee.name == 'define'){
+							statement.expression.arguments.unshift({type: 'Literal', value: path});
+							memo.push(statement);
+						}
+						return memo;
+					}, []);
+					return node;
+				});
+				else build += 'load(\''+path+'\', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
+				build += '\n\n'; 
 			}, function(e){
 				if(e) callback(e);
-				else getFile('client.js', function(e, require){
+				else getFile('lib/client.js', function(e, require){
 					var output = require+'\n\n'
 								 +'thumos.config = '+JSON.stringify(config)+'\n\n'
 								 +build
@@ -118,11 +138,7 @@ module.exports = function(config){
 				function require(path){
 					return api.modules[path];
 				}
-				try{
-					eval(js);
-				}catch(e){
-					callback(e);
-				}
+				eval(js);
 			}, function(e){
 				callback.apply(this, [e].concat(_.values(_.pick(api.modules, paths))));
 			});	
