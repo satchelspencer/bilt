@@ -118,11 +118,7 @@ module.exports = function(config){
 					node.body = _.reduce(node.body, function(memo, statement){
 						if(isCallTo(statement, 'define', 'client')){
 							statement.expression.callee.name == 'define';
-							var norm = normalize(path);
-							var depLiterals = _.map(pathConfig.deps, function(dep){
-								return {type: 'Literal', value: norm(dep)};
-							});
-							statement.expression.arguments.unshift({type: 'Literal', value: path}, {type : 'ArrayExpression', elements : depLiterals});
+							statement.expression.arguments.unshift({type: 'Literal', value: path});
 							memo.push(statement);
 						}
 						return memo;
@@ -135,9 +131,8 @@ module.exports = function(config){
 				if(e) callback(e);
 				else getFile('lib/client.js', function(e, require){
 					var output = require+'\n\n'
-								 +'thumos.config = '+JSON.stringify(config)+';\n\n'
 								 +build
-								 +'thumos.init('+init.toString()+', '+JSON.stringify(paths)+')\n';
+								 +'bilt.init('+init.toString()+', '+JSON.stringify(paths)+')\n';
 					if(!options.noMinify) output = uglify.minify(output, {fromString: true}).code;
 					callback(e, output);
 				});
