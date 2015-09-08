@@ -21,6 +21,7 @@
     "uglify-js": "~2.4.24",
     "escodegen": "~1.7.0",
     "esprima": "~2.6.0",
-    "esprima-walk": "~0.1.0"
+    "esprima-walk": "~0.1.0",
+    "sqwish": "~0.2.2"
   }
 }

@@ -22,6 +22,7 @@ module.exports = function(config){
 	}
 
 	function getFile(path, callback){
+		console.log(path);
 		var s = path.split('!');
 		if(s[1]) path = s[1];
 		if(path.match(/^http(s)*:\/\//)) request(path, function(e,r,body){
@@ -33,6 +34,11 @@ module.exports = function(config){
 	function parse(js, transformer){
 		var parse = esprima.parse(js);
 		return escodegen.generate(transformer(parse));
+	}
+	
+	function isCallTo(statement){
+		var opts = _.rest(arguments);
+		return statement.expression.type == 'CallExpression' && _.contains(opts, statement.expression.callee.name);
 	}
 			
 	var api = {
@@ -74,7 +80,7 @@ module.exports = function(config){
 								function cont(){
 									var pathConfig = obj.pathsConfig[path]||{};
 									pathConfig.remote = !!remote;
-									var deps = pathConfig.deps||[];
+									pathConfig.deps = pathConfig.deps||[];
 									if(pathConfig.export){ //nonstandard module
 										var e = obj.pathsConfig[path].export;
 										js = 'define((function(){'+js+'\nreturn '+e+'})());';
@@ -84,14 +90,14 @@ module.exports = function(config){
 											eswalk(node, function(child){
 												if(child.type == 'CallExpression' && child.callee.name == 'require'){
 													var dep = child.arguments[0].value
-													deps.push(dep);
+													pathConfig.deps.push(dep);
 													child.arguments[0].value = normer(dep);
 												}
 											});
 											return node;
 										});
 									}
-									obj.start(deps, each, function(e){
+									obj.start(pathConfig.deps, each, function(e){
 										each(path, js, pathConfig, context);
 										pathDone(e);
 									}, context.concat(path));
@@ -104,34 +110,51 @@ module.exports = function(config){
 			return obj; 
 		},
 		modules : {},
-		build : function(paths, init, callback){
+		build : function(paths, options, init, callback){
+			options = options||{};
 			var build = "";
 			api.trace().start(paths, function(path, rawjs, pathConfig, context){				
 				if(!pathConfig.remote || pathConfig.include) build += parse(rawjs, function(node){
 					node.body = _.reduce(node.body, function(memo, statement){
-						if(statement.expression.type == 'CallExpression' && statement.expression.callee.name == 'define'){
-							statement.expression.arguments.unshift({type: 'Literal', value: path});
+						if(isCallTo(statement, 'define', 'client')){
+							statement.expression.callee.name == 'define';
+							var norm = normalize(path);
+							var depLiterals = _.map(pathConfig.deps, function(dep){
+								return {type: 'Literal', value: norm(dep)};
+							});
+							statement.expression.arguments.unshift({type: 'Literal', value: path}, {type : 'ArrayExpression', elements : depLiterals});
 							memo.push(statement);
 						}
 						return memo;
 					}, []);
 					return node;
 				});
-				else build += 'load(\''+path+'\', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
+				else build += 'load(\''+path+'\', '+JSON.stringify(_.map(pathConfig.deps||[], normalize(path)))+', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
 				build += '\n\n'; 
 			}, function(e){
 				if(e) callback(e);
 				else getFile('lib/client.js', function(e, require){
 					var output = require+'\n\n'
-								 +'thumos.config = '+JSON.stringify(config)+'\n\n'
+								 +'thumos.config = '+JSON.stringify(config)+';\n\n'
 								 +build
 								 +'thumos.init('+init.toString()+', '+JSON.stringify(paths)+')\n';
+					if(!options.noMinify) output = uglify.minify(output, {fromString: true}).code;
 					callback(e, output);
 				});
 			});	
 		},
 		require : function(paths, callback, context){
-			api.trace().start(paths, function(path, js, pathConfig, context){
+			api.trace().start(paths, function(path, rawjs, pathConfig, context){
+				js = parse(rawjs, function(node){
+					node.body = _.reduce(node.body, function(memo, statement){
+						if(isCallTo(statement, 'define', 'server')){
+							statement.expression.callee.name == 'define';
+							memo.push(statement);
+						}
+						return memo;
+					}, []);
+					return node;
+				});
 				function define(value){
 					api.modules[path] = value;
 				}
