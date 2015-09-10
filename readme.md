@@ -26,6 +26,13 @@ define(function(){
   console.log(myfn(mystring)); /* log: IM A STRING */
 });
 ~~~
+you can optionally include a config parameter in the define function, as an array of dependencies to include:
+~~~ Javascript
+define(['some_dep.js'], 'my module');
+~~~
+or as a config object with properties:
+ - `deps` array of paths to be required
+ - `paths` paths config (see [`configuration`](#configuration-options)) to be applied to module and all of its children
 
 ## node usage
 create a new instace of built with a [`config object`](#configuration-options)
@@ -54,6 +61,7 @@ passed as an object with *any* of the following properties:
    - `deps` array of paths the module is dependent on.
    - `export` specify what variable to export for standard javascript files.
    - `include` boolean (build only) to include in build or load externally.
+   - `nodePath` specify separate path to require instead when executing in the node environment
    - *examples*
      
       ~~~ Javascript
