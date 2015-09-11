@@ -26,6 +26,14 @@ define(function(){
   console.log(myfn(mystring)); /* log: IM A STRING */
 });
 ~~~
+modules executing in the node environment may call `nodeRequire`
+~~~ Javascript
+define(function(path){
+  //nodeModule.js
+  var fs = nodeRequire('fs');
+  return fs.statSync(path);
+});
+~~~
 you can optionally include a config parameter in the define function, as an array of dependencies to include:
 ~~~ Javascript
 define(['some_dep.js'], 'my module');
@@ -33,6 +41,21 @@ define(['some_dep.js'], 'my module');
 or as a config object with properties:
  - `deps` array of paths to be required
  - `paths` paths config (see [`configuration`](#configuration-options)) to be applied to module and all of its children
+
+~~~ Javascript
+define({
+  paths : {
+  	string : {
+      source : './mystring.js',
+  	}
+  },
+  deps : ['./mymod.js']
+}function(path){
+  var fs = require('string');
+  return string+'!';
+});
+~~~
+
 
 ## node usage
 create a new instace of built with a [`config object`](#configuration-options)

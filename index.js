@@ -1,4 +1,4 @@
-var fs = require('fs-extra');
+var fs = require('fs');
 var async = require('async');
 var findRequires = require('find-requires');
 var request = require('request');
@@ -10,27 +10,10 @@ var escodegen = require('escodegen');
 
 var plugins = require('./lib/plugins');
 
-module.exports = function(globalConfig){		
-	function normalize(parent, isBuild){
-		return function(path){
-			var split = path.split('!');
-			if(split[1]) path = split[1];
-			if(parent) path = path.replace(/^\.\//, parent.match(/(.+)\/.+/)[1]+'/');
-			var pathConfig = api.config.paths[path];
-			if(pathConfig){
-				if(_.isString(pathConfig)) path = pathConfig;
-				else{
-					if(pathConfig.source) path = pathConfig.source;
-					if(!isBuild && pathConfig.nodePath) path = pathConfig.nodePath;
-				}
-			}
-			return (split[1]?split[0]+'!':'')+path;
-		}
-	}
-
+module.exports = function(globalConfig){			
+	/* get file by path, local or http(s) */
 	function getFile(path, callback){
-		var s = path.split('!');
-		if(s[1]) path = s[1];
+		path = _.last(path.split('!')); //ignore the plugin value
 		if(path.match(/^http(s)*:\/\//)) request(path, function(e,r,body){
 			callback(e, body, true); //callback saying its remote
 		});
@@ -42,8 +25,9 @@ module.exports = function(globalConfig){
 		return escodegen.generate(transformer(parse));
 	}
 	
-	function newNormalize(config, context){
-		return function(path){
+	function getNormalizer(config, context){
+		function norm(path, pathContext){
+			pathContext = (pathContext||[]).concat(path);
 			var current = _.last(context);
 			var split = path.split('!');
 			if(split[1]) path = split[1];
@@ -56,8 +40,18 @@ module.exports = function(globalConfig){
 					if(!config.isBuild && pathConfig.nodePath) path = pathConfig.nodePath;
 				}
 			}
+			/* path is now its final value */
+			var exists = !!path.match(/^http(s)*:\/\//);
+			if(!exists) try{
+				exists = !!fs.statSync(path);
+			}catch(e){}
+			if(!exists){
+				if(_.contains(pathContext, path)) throw 'path "'+path+'" failed to resolve';
+				path = norm(path, pathContext);
+			}
 			return (split[1]?split[0]+'!':'')+path;
 		}
+		return norm;
 	}
 	
 	function trace(isBuild){
@@ -68,7 +62,7 @@ module.exports = function(globalConfig){
 				context = context||[];
 				var depsConfigs = {};
 				config.deps = _.map(config.deps, function(path){
-					var n = newNormalize(config, context)(path);
+					var n = getNormalizer(config, context)(path);
 					if(config.paths[path] && config.paths[path].source) depsConfigs[n] = config.paths[path];
 					return n;
 				});
@@ -119,11 +113,12 @@ module.exports = function(globalConfig){
 										}
 										return isDefine;
 									});
+									var requireNormalizer = getNormalizer(depConfig, depContext);
 									eswalk(node, function(child){
 										if(child.type == 'CallExpression' && child.callee.name == 'require'){
 											var dep = child.arguments[0].value
 											depConfig.deps = _.uniq(depConfig.deps.concat(dep));
-											child.arguments[0].value = newNormalize(depConfig, depContext)(dep);
+											child.arguments[0].value = requireNormalizer(dep);
 										}
 									});
 									return node;
@@ -156,7 +151,7 @@ module.exports = function(globalConfig){
 			trace(true).newStart({
 				paths : api.config.paths,
 				deps : paths
-			}, function(path, rawjs, pathConfig, context){				
+			}, function(path, rawjs, pathConfig, context){
 				if(!pathConfig.remote || pathConfig.include) build += parse(rawjs, function(node){
 					node.body = _.each(node.body, function(statement){
 							statement.expression.arguments.unshift({type: 'Literal', value: path});
@@ -177,7 +172,10 @@ module.exports = function(globalConfig){
 				});
 			});	
 		},
-		require : function(paths, callback, context){
+		require : function(paths, callback, context){			
+			function nodeRequire(path){
+				return require(path);
+			}
 			trace().newStart({
 				paths : api.config.paths,
 				deps : paths
