@@ -196,7 +196,14 @@ module.exports = function(globalConfig){
 					api.modules[path] = value;
 				}
 				function require(path){
-					return api.modules[path];
+					var plugins = path.split('!');
+					var rpath = plugins.pop();
+					var value = api.modules[path];
+					return _.reduce(_.map(plugins, function(pluginPath){
+						return api.modules[pluginPath];
+					}), function(memo, plugin){
+						return plugin?plugin(memo):memo;
+					}, value);
 				}
 				eval(js);
 			}, function(e, loaded){
