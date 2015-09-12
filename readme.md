@@ -102,29 +102,20 @@ passed as an object with *any* of the following properties:
  
 
 ## plugins
-plugins transform the input from a path before they are loaded or built as a module. They are specified by prepending a path with the name of the plugin and `!` **example:**
+plugins filter the module being required. plugins are prepended to a path in a require call like so: `path_to_plugin.js!my_module.js`. plugins are simply modules (an object) with any of the three optional properties defined as in this contrived example:
 ~~~ Javascript
-define(function(){
-  var text = require('text!./mypath.txt');
-  console.log(text); //hooray!
-});
+define({
+  normalize : function(path){
+  	return path+'.txt';
+  },
+  transform : function(raw, callback){
+  	callback(null, 'define('+JSON.stringify(raw)+')');
+  },
+  init : function(value){
+  	return 'the plugin:'+value;
+  }
+})
 ~~~
-mypath.txt:
-~~~
-hooray!
-~~~
-### built in plugins
- - `text` returns the value of the file as a string
- - `css` parses less, autoprefixes, minifies and append the styles to a page
-
-### make your own plugins!
-`bilt.addPlugins(object)` adds plugin(s). object keys are the plugin names, values are the plugins themselves. plugins are simply a function of the format `function(input, callback)`:
- - `input` the text value of the module to be transformed
- - `callback` to be called on completeion with the error and final value.
-
-see the `text` plugin's source as an example:
-~~~ Javascript
-text : function(text, callback){
-	callback(null, 'define('+JSON.stringify(text)+')');
-}
-~~~
+ - `normalize` a function that is passed the path of the module to be required and returns its new value, as desired
+ - `transform` run always in node, takes in raw string from the loaded file and returns the javascript to be evaluated by bilt.
+ - `init` run every time the module is required, modifies its value
