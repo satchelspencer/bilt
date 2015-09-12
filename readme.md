@@ -104,6 +104,7 @@ passed as an object with *any* of the following properties:
 ## plugins
 plugins filter the module being required. plugins are prepended to a path in a require call like so: `path_to_plugin.js!my_module.js`. plugins are simply modules (an object) with any of the three optional properties defined as in this contrived example:
 ~~~ Javascript
+//text.js
 define({
   normalize : function(path){
   	return path+'.txt';
@@ -119,3 +120,14 @@ define({
  - `normalize` a function that is passed the path of the module to be required and returns its new value, as desired
  - `transform` run always in node, takes in raw string from the loaded file and returns the javascript to be evaluated by bilt.
  - `init` run every time the module is required, modifies its value
+
+example usage:
+~~~ Javascript
+//mytext.txt
+i'm the contents of a text file!
+~~~
+~~~ Javascript
+define(function(){
+ return require('text.js!mytext'); // "the plugin: i'm the contents of a text file!"
+})
+~~~
