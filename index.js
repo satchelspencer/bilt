@@ -8,16 +8,36 @@ var esprima = require('esprima');
 var eswalk = require('esprima-walk');
 var escodegen = require('escodegen');
 
-var plugins = require('./lib/plugins');
-
-module.exports = function(globalConfig){			
+module.exports = function(globalConfig){
+	globalConfig.paths = globalConfig.paths||{};
+			
 	/* get file by path, local or http(s) */
 	function getFile(path, callback){
-		path = _.last(path.split('!')); //ignore the plugin value
-		if(path.match(/^http(s)*:\/\//)) request(path, function(e,r,body){
-			callback(e, body, true); //callback saying its remote
-		});
-		else fs.readFile(path, 'utf8', callback);
+		var source = _.last(path.split('!'));
+		var pluginPaths = _.without(_.initial(path.split('!')), source);
+		api.require(pluginPaths, function(){
+			var plugins = arguments;
+			async.reduce(plugins, source, function(memo, plugin, done){
+				var pluginNormalize = plugin.normalize||_.identity;
+				done(null, pluginNormalize(memo));
+			}, function(e, source){
+				if(e) callback(e);
+				else if(source.match(/^http(s)*:\/\//)) request(source, function(e,r,body){
+					transform(e, body, true); //callback saying its remote
+				});
+				else fs.readFile(source, 'utf8', transform);
+			});
+			function transform(e, raw, remote){
+				if(e) callback(e);
+				else async.reduce(plugins, raw, function(memo, plugin, transformed){
+					var transform = plugin.transform||plugin;
+					if(_.isFunction(transform)) transform(memo, transformed);
+					else transformed(null, memo);
+				}, function(e, js){
+					callback(e, js, remote, _.object(pluginPaths, plugins));
+				});
+			}
+		});	
 	}
 	
 	function parse(js, transformer){
@@ -29,27 +49,27 @@ module.exports = function(globalConfig){
 		function norm(path, pathContext){
 			pathContext = (pathContext||[]).concat(path);
 			var current = _.last(context);
-			var split = path.split('!');
-			if(split[1]) path = split[1];
-			if(current) path = path.replace(/^\.\//, current.match(/(.+)\/.+/)[1]+'/');
-			var pathConfig = config.paths[path];
-			if(pathConfig){
-				if(_.isString(pathConfig)) path = pathConfig;
-				else{
-					if(pathConfig.source) path = pathConfig.source;
-					if(!config.isBuild && pathConfig.nodePath) path = pathConfig.nodePath;
+			return _.map(path.split('!'), function(path){
+				if(current) path = path.replace(/^\.\//, _.last(current.split('!')).match(/(.+)\/.+/)[1]+'/');
+				var pathConfig = config.paths[path];
+				if(pathConfig){
+					if(_.isString(pathConfig)) path = pathConfig;
+					else{
+						if(pathConfig.source) path = pathConfig.source;
+						if(!config.isBuild && pathConfig.nodePath) path = pathConfig.nodePath;
+					}
 				}
-			}
-			/* path is now its final value */
-			var exists = !!path.match(/^http(s)*:\/\//);
-			if(!exists) try{
-				exists = !!fs.statSync(path);
-			}catch(e){}
-			if(!exists){
-				if(_.contains(pathContext, path)) throw 'path "'+path+'" failed to resolve';
-				path = norm(path, pathContext);
-			}
-			return (split[1]?split[0]+'!':'')+path;
+				/* path is now its final value */
+				var exists = !!path.match(/^http(s)*:\/\//);
+				if(!exists) try{
+					exists = !!fs.statSync(path);
+				}catch(e){}
+				if(!exists){
+					if(_.contains(pathContext, path)) throw 'path "'+path+'" failed to resolve';
+					path = norm(path, pathContext);
+				}
+				return path;
+			}).join('!');
 		}
 		return norm;
 	}
@@ -61,90 +81,81 @@ module.exports = function(globalConfig){
 			newStart : function(config, each, complete, context){
 				context = context||[];
 				var depsConfigs = {};
+				config.isBuild = isBuild;
 				config.deps = _.map(config.deps, function(path){
 					var n = getNormalizer(config, context)(path);
 					if(config.paths[path] && config.paths[path].source) depsConfigs[n] = config.paths[path];
 					return n;
 				});
 				config.deps = _.difference(config.deps, context, obj.visited);
-				config.isBuild = isBuild;
 				async.each(config.deps, function(depPath, depDone){
 					obj.visited.push(depPath);
-					getFile(depPath, function(e, js, remote){
+					getFile(depPath, function(e, js, remote, plugins){
 						if(e) depDone(e);
 						else{
-							var split = depPath.split('!');
-							var plugin = split[1]?split[0]:false;
-							if(plugin){
-								if(!api.plugins[plugin]) pathDone('plugin: '+plugin+' does not exist');
-								else api.plugins[plugin](js, function(e, njs){
-									if(e) pathDone(e);
-									else{
-										js = njs;
-										cont();
+							var depContext = context.concat(depPath);
+							var depConfig = {
+								paths : JSON.parse(JSON.stringify(config.paths)),
+								deps : [],
+								remote : !!remote,
+								isBuild : isBuild
+							};
+							if(depsConfigs[depPath]) _.each(depsConfigs[depPath], function(val, key){
+								depConfig[key] = val;
+							});
+							
+							if(_.keys(plugins).length) _.each(plugins, function(plugin, pluginPath){
+								if(plugin.init){
+									obj.visited.push(pluginPath);
+									each(pluginPath, 'define('+plugin.init.toString()+')', depConfig, context);
+								}
+							});
+																					
+							if(depConfig.export) js = 'define((function(){'+js+'\nreturn '+depConfig.export+'})());';
+							else js = parse(js, function(node){
+								node.body = _.filter(node.body, function(statement){
+									var isDefine = statement.expression.type == 'CallExpression' && statement.expression.callee.name == 'define';
+									if(isDefine && statement.expression.arguments.length == 2){
+										var inlineConfig = statement.expression.arguments.shift();
+										inlineConfig = eval('('+escodegen.generate(inlineConfig)+')');
+										if(_.isArray(inlineConfig)) depConfig.deps = _.uniq(depConfig.deps.concat(inlineConfig));
+										else if(_.isObject(inlineConfig)){
+											if(inlineConfig.deps) depConfig.deps = _.uniq(depConfig.deps.concat(inlineConfig.deps));
+											if(inlineConfig.paths) _.each(inlineConfig.paths, function(value, path){
+												depConfig.paths[path] = value;
+											});
+										}
+									}
+									return isDefine;
+								});
+								var requireNormalizer = getNormalizer(depConfig, depContext);
+								eswalk(node, function(child){
+									if(child.type == 'CallExpression' && child.callee.name == 'require'){
+										var dep = child.arguments[0].value
+										depConfig.deps = _.uniq(depConfig.deps.concat(dep));
+										child.arguments[0].value = requireNormalizer(dep);
 									}
 								});
-							}else cont();
-							function cont(){
-								var depContext = context.concat(depPath);
-								var depConfig = {
-									paths : JSON.parse(JSON.stringify(config.paths)),
-									deps : [],
-									remote : !!remote
-								};
-								if(depsConfigs[depPath]) _.each(depsConfigs[depPath], function(val, key){
-									depConfig[key] = val;
-								});
-								
-								if(depConfig.export) js = 'define((function(){'+js+'\nreturn '+depConfig.export+'})());';
-								else js = parse(js, function(node){
-									node.body = _.filter(node.body, function(statement){
-										var isDefine = statement.expression.type == 'CallExpression' && statement.expression.callee.name == 'define';
-										if(isDefine && statement.expression.arguments.length == 2){
-											var inlineConfig = statement.expression.arguments.shift();
-											inlineConfig = eval('('+escodegen.generate(inlineConfig)+')');
-											if(_.isArray(inlineConfig)) depConfig.deps = _.uniq(depConfig.deps.concat(inlineConfig));
-											else if(_.isObject(inlineConfig)){
-												if(inlineConfig.deps) depConfig.deps = _.uniq(depConfig.deps.concat(inlineConfig.deps));
-												if(inlineConfig.paths) _.each(inlineConfig.paths, function(value, path){
-													depConfig.paths[path] = value;
-												});
-											}
-										}
-										return isDefine;
-									});
-									var requireNormalizer = getNormalizer(depConfig, depContext);
-									eswalk(node, function(child){
-										if(child.type == 'CallExpression' && child.callee.name == 'require'){
-											var dep = child.arguments[0].value
-											depConfig.deps = _.uniq(depConfig.deps.concat(dep));
-											child.arguments[0].value = requireNormalizer(dep);
-										}
-									});
-									return node;
-								});
-								
-								obj.newStart(depConfig, each, function(e){
-									each(depPath, js, depConfig, context);
-									depDone(e);
-								}, depContext);
-							}	
+								return node;
+							});
+														
+							obj.newStart(depConfig, each, function(e){
+								each(depPath, js, depConfig, context);
+								depDone(e);
+							}, depContext);
 						}
 					});
-				}, complete)
+				}, function(e){
+					complete(e, obj.visited);
+				});
 			}
 		}
 		return obj; 
 	}
 			
 	var api = {
-		config : globalConfig||{},
+		config : globalConfig,
 		plugins : {},
-		addPlugins : function(plugins){
-			_.each(plugins, function(value, key){
-				api.plugins[key] = value;
-			});
-		},
 		modules : {},
 		build : function(paths, init, callback){
 			var build = "";
@@ -158,17 +169,17 @@ module.exports = function(globalConfig){
 					});
 					return node;
 				});
-				else build += 'load(\''+path+'\', '+JSON.stringify(_.map(pathConfig.deps||[], normalize(path)))+', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
+				else build += 'load(\''+path+'\', '+JSON.stringify(pathConfig.deps||[])+', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
 				build += '\n\n'; 
-			}, function(e){
+			}, function(e, loaded){
 				if(e) callback(e);
-				else getFile('lib/client.js', function(e, require){
+				else fs.readFile('lib/client.js', 'utf8', function(e, require){
 					require = uglify.minify(require, {fromString: true}).code;
 					var output = require+'\n\n'
 								 +build
 								 +'bilt.init('+init.toString()+', '+JSON.stringify(paths)+')\n';
 					if(!api.config.noMinify) output = uglify.minify(output, {fromString: true}).code;
-					callback(e, output);
+					callback(e, output, loaded);
 				});
 			});	
 		},
@@ -176,10 +187,11 @@ module.exports = function(globalConfig){
 			function nodeRequire(path){
 				return require(path);
 			}
-			trace().newStart({
+			var conf = {
 				paths : api.config.paths,
 				deps : paths
-			}, function(path, js, pathConfig, context){
+			};
+			trace().newStart(conf, function(path, js, pathConfig, context){
 				function define(value){
 					api.modules[path] = value;
 				}
@@ -187,11 +199,12 @@ module.exports = function(globalConfig){
 					return api.modules[path];
 				}
 				eval(js);
-			}, function(e){
-				callback.apply(this, _.values(_.pick(api.modules, paths)));
+			}, function(e, loaded){
+				callback.apply(this, _.values(_.pick(api.modules, _.map(paths, function(path){
+					return getNormalizer(conf)(path);
+				}))));
 			});	
 		}
 	}
-	api.addPlugins(plugins);
 	return api;
 };
