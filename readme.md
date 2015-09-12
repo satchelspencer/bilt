@@ -122,7 +122,7 @@ define({
  - `init` run every time the module is required, modifies its value
 
 example usage:
-~~~ Javascript
+~~~ 
 //mytext.txt
 i'm the contents of a text file!
 ~~~
