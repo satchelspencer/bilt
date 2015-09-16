@@ -4,6 +4,7 @@ javascript module loader/build tool for briding the gap between server and clien
  - [`node usage`](#node-usage)
  - [`configuration`](#configuration-options)
  - [`plugins`](#plugins)
+ - [`environment`](#environmnent-exclusion)
 
 ## module definition
 each module is a javascript file with a call to `define` passing any javascript you like
@@ -102,7 +103,7 @@ passed as an object with *any* of the following properties:
  
 
 ## plugins
-plugins filter the module being required. plugins are prepended to a path in a require call like so: `path_to_plugin.js!my_module.js`. plugins are simply modules (an object) with any of the three optional properties defined as in this contrived example:
+plugins filter the module being required. plugins are prepended to a path in a require call like so: `path_to_plugin.js!my_module.js`. plugins are simply modules (an object) with *any* of the three optional properties defined as in this contrived example:
 ~~~ Javascript
 //text.js
 define({
@@ -131,3 +132,9 @@ define(function(){
  return require('text.js!mytext'); // "the plugin: i'm the contents of a text file!"
 })
 ~~~
+
+## environmnent exclusion
+bilt offers two functions that allow the expression within them to only be executed onthe client or server.
+ - `client(expression)` returns expression on client, null on server
+ - `server(expression)` visa versa
+this is especially useful in plugins with an init step that will only be run on the client to prevent client-only dependencies from being loaded during plugin normalization/transformation in the build step
