@@ -16,6 +16,7 @@
     "escodegen": "~1.7.0",
     "esprima": "~2.6.0",
     "esprima-walk": "~0.1.0",
-    "sqwish": "~0.2.2"
+    "sqwish": "~0.2.2",
+    "parent-require": "~1.0.0"
   }
 }
