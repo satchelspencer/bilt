@@ -12,6 +12,7 @@ var prequire = require('parent-require');
 
 module.exports = function(globalConfig){
 	globalConfig.paths = globalConfig.paths||{};
+	globalConfig.paths.noop = path.join(__dirname, 'lib/noop.js');
 			
 	/* get file by path, local or http(s) */
 	function getFile(filePath, config, callback){
@@ -112,15 +113,16 @@ module.exports = function(globalConfig){
 								depConfig[key] = val;
 								specificConfig[key] = val;
 							});
-							
+														
 							if(_.keys(plugins).length) _.each(plugins, function(plugin, pluginPath){
 								if(_.has(plugin, 'init')) depConfig.deps.push(pluginPath);
 							});
-																					
-							if(depConfig.export) js = 'define((function(){'+js+'\nreturn '+depConfig.export+'})());';
-							else js = parse(js, function(node){
+																																			
+							if(depConfig.export){
+								js = 'define((function(){'+js+'\nreturn '+depConfig.export+'})());';
+							}else js = parse(js, function(node){
 								node.body = _.filter(node.body, function(statement){
-									var isDefine = statement.expression.type == 'CallExpression' && statement.expression.callee.name == 'define';
+									var isDefine = statement.expression && statement.expression.type == 'CallExpression' && statement.expression.callee.name == 'define';
 									if(isDefine && statement.expression.arguments.length == 2){
 										var inlineConfig = statement.expression.arguments.shift();
 										inlineConfig = eval('('+escodegen.generate(inlineConfig)+')');
@@ -149,7 +151,7 @@ module.exports = function(globalConfig){
 								});
 								return node;
 							});
-							
+														
 							obj.configs[depPath] = specificConfig;
 														
 							obj.newStart(depConfig, each, function(e){
@@ -177,21 +179,25 @@ module.exports = function(globalConfig){
 				deps : paths
 			};
 			trace(true).newStart(conf, function(path, rawjs, pathConfig){
-				if(!pathConfig.remote || pathConfig.include) build += parse(rawjs, function(node){
+				var js = '';
+				if(!pathConfig.remote || pathConfig.include) js = parse(rawjs, function(node){
 					node.body = _.each(node.body, function(statement){
 							statement.expression.arguments.unshift({type: 'Literal', value: path});
 					});
 					return node;
 				});
-				else build += 'load(\''+path+'\', '+JSON.stringify(pathConfig.deps||[])+', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
-				if(rawjs.length) build += '\n\n'; 
+				else js = 'load(\''+path+'\', '+JSON.stringify(pathConfig.deps||[])+', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
+				if(pathConfig.minify) js = uglify.minify(js, {fromString: true}).code;
+				if(js.length) build += js+'\n\n'; 
 			}, function(e, loaded, configs){
 				if(e) callback(e);
 				else fs.readFile(path.join(__dirname, 'lib/client.js'), 'utf8', function(e, require){
 					require = uglify.minify(require, {fromString: true}).code;
 					var output = require+'\n\n'
 								 +build
-								 +escodegen.generate(esprima.parse('bilt.init('+init.toString()+', '+JSON.stringify(_.map(paths, getNormalizer(conf)))+')\n'));
+								 +escodegen.generate(esprima.parse('bilt.init('+init.toString()+', '+JSON.stringify(_.map(paths, function(spath){
+								 	return getNormalizer(conf)(spath);
+								 }))+')\n'));
 					if(!api.config.noMinify) output = uglify.minify(output, {fromString: true}).code;
 					callback(e, output, loaded, configs);
 				});
@@ -205,11 +211,15 @@ module.exports = function(globalConfig){
 				paths : api.config.paths,
 				deps : paths
 			};
+			var normalizedPaths = _.map(paths, function(path){
+				return getNormalizer(conf)(path);
+			});
 			var rconf = {};
 			trace().newStart(conf, function(path, js, pathConfig){
 				_.extend(rconf, pathConfig);
 				function define(value){
 					api.modules[path] = value;
+					if(_.contains(normalizedPaths, path)) api.modules[path] = require(path);
 				}
 				function require(path){
 					var plugins = path.split('!');
@@ -227,9 +237,7 @@ module.exports = function(globalConfig){
 				eval(js);
 			}, function(e, loaded){
 				if(showConfig) callback(e, loaded, rconf);
-				else callback.apply(this, _.values(_.pick(api.modules, _.map(paths, function(path){
-					return getNormalizer(conf)(path);
-				}))));
+				else callback.apply(this, _.values(_.pick(api.modules, normalizedPaths)));
 			});	
 		}
 	}
