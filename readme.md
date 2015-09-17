@@ -5,6 +5,7 @@ javascript module loader/build tool for briding the gap between server and clien
  - [`configuration`](#configuration-options)
  - [`plugins`](#plugins)
  - [`environment`](#environmnent-exclusion)
+ - [`dependencies`](#dependencies)
 
 ## module definition
 each module is a javascript file with a call to `define` passing any javascript you like
@@ -86,6 +87,7 @@ passed as an object with *any* of the following properties:
    - `export` specify what variable to export for standard javascript files.
    - `include` boolean (build only) to include in build or load externally.
    - `nodePath` specify separate path to require instead when executing in the node environment
+   - `minify` bool if to minify just this module
    - *examples*
      
       ~~~ Javascript
@@ -99,7 +101,7 @@ passed as an object with *any* of the following properties:
         export : '$'
       }
       ~~~
- - `noMinify` boolean, determines if to use minification in build
+ - `noMinify` boolean, determines if to use minification in build, if false all modules will be minified regardless of their settings
  
 
 ## plugins
@@ -138,3 +140,13 @@ bilt offers two functions that allow the expression within them to only be execu
  - `client(expression)` returns expression on client, null on server
  - `server(expression)` visa versa
 this is especially useful in plugins with an init step that will only be run on the client to prevent client-only dependencies from being loaded during plugin normalization/transformation in the build step
+
+## dependencies
+ - [`async`](https://github.com/caolan/async) asyncronous control flow / functional library
+ - [`underscore`](http://underscorejs.org/) synchrouous functional library
+ - [`request`](https://github.com/request/request) for downloading external files with http(s)
+ - [`uglify-js2`](https://github.com/mishoo/UglifyJS2) javascript minification
+ - [`esprima`](http://esprima.org/) javascript parser
+ - [`esprima-walk`](https://github.com/jrajav/esprima-walk) iterates over expressions in an esprima object
+ - [`escodegen`](https://github.com/estools/escodegen) generates source from esprima object
+ - [`parent-require`](https://github.com/jaredhanson/node-parent-require) nodrequires up the dependency tree
