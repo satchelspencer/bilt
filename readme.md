@@ -136,9 +136,9 @@ define(function(){
 ~~~
 
 ## environmnent exclusion
-bilt offers two functions that allow the expression within them to only be executed onthe client or server.
- - `client(expression)` returns expression on client, null on server
- - `server(expression)` visa versa
+bilt offers two functions that allow the expression within them to only be executed in node or the browser.
+ - `browser(expression)` returns expression on client, null on server
+ - `node(expression)` visa versa
 this is especially useful in plugins with an init step that will only be run on the client to prevent client-only dependencies from being loaded during plugin normalization/transformation in the build step
 
 ## dependencies

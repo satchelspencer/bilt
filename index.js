@@ -1,4 +1,4 @@
-var fs = require('fs');
+var fs = require('fs-extra');
 var path = require('path');
 var async = require('async');
 var findRequires = require('find-requires');
@@ -9,6 +9,16 @@ var esprima = require('esprima');
 var eswalk = require('esprima-walk');
 var escodegen = require('escodegen');
 var prequire = require('parent-require');
+var nodeResolve = require('require-resolve');
+
+function resolve(path){
+    var traveler = module.parent;
+    for (;traveler;traveler = traveler.parent){
+        var o = nodeResolve(path, traveler.filename);
+        if(o) return o.src;
+    }
+    return null;
+}
 
 module.exports = function(globalConfig){
 	globalConfig.paths = globalConfig.paths||{};
@@ -16,6 +26,7 @@ module.exports = function(globalConfig){
 			
 	/* get file by path, local or http(s) */
 	function getFile(filePath, config, callback){
+    
 		var source = _.last(filePath.split('!'));
 		var pluginPaths = _.without(_.initial(filePath.split('!')), source);
 		api.require(pluginPaths, function(){
@@ -52,10 +63,18 @@ module.exports = function(globalConfig){
 	}
 	
 	function getNormalizer(config){
+		var invert = _.reduce(config.paths, function(memo, path, alias){
+			if(path.nodePath){
+				memo[path.nodePath] = alias;
+				memo[path.source||path] = alias;
+			}
+			return memo;
+		}, {});
 		function norm(path, pathContext){
 			pathContext = (pathContext||[]).concat(path);
 			var current = _.last(config.context);
 			return _.map(path.split('!'), function(path){
+				if(invert[path]) path = invert[path];
 				if(current) path = path.replace(/^\.\//, _.last(current.split('!')).match(/(.+)\/.+/)[1]+'/');
 				var pathConfig = config.paths[path];
 				if(pathConfig){
@@ -71,7 +90,11 @@ module.exports = function(globalConfig){
 					exists = !!fs.statSync(path);
 				}catch(e){}
 				if(!exists){
-					if(_.contains(pathContext, path)) throw 'path "'+path+'" failed to resolve';
+					if(_.contains(pathContext, path)){
+				        var resolved = resolve(path);
+				        if(resolved) path = resolved;
+					    else throw 'path "'+path+'" failed to resolve';
+				    }
 					path = norm(path, pathContext);
 				}
 				return path;
@@ -140,8 +163,8 @@ module.exports = function(globalConfig){
 								var requireNormalizer = getNormalizer(depConfig);
 								eswalk(node, function(child){
 									if(child.type == 'CallExpression' && (
-									  (child.callee.name == 'client' && !isBuild) ||
-									  (child.callee.name == 'server' && isBuild)
+									  (child.callee.name == 'browser' && !isBuild) ||
+									  (child.callee.name == 'node' && isBuild)
 									)) child.arguments = [];
 									else if(child.type == 'CallExpression' && child.callee.name == 'require'){
 										var dep = child.arguments[0].value
@@ -231,8 +254,11 @@ module.exports = function(globalConfig){
 						return plugin?plugin.init(memo):memo;
 					}, value);
 				}
-				function client(){
+				function browser(){
 					return null;
+				}
+				function node(v){
+					return v;
 				}
 				eval(js);
 			}, function(e, loaded){
