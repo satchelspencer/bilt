@@ -11,22 +11,21 @@ var escodegen = require('escodegen');
 var prequire = require('parent-require');
 var nodeResolve = require('require-resolve');
 
-function resolve(path){
-    var traveler = module.parent;
-    for (;traveler;traveler = traveler.parent){
-        var o = nodeResolve(path, traveler.filename);
-        if(o) return o.src;
-    }
-    return null;
-}
-
 module.exports = function(globalConfig){
 	globalConfig.paths = globalConfig.paths||{};
 	globalConfig.paths.noop = path.join(__dirname, 'lib/noop.js');
 			
+	function resolve(path){
+        var traveler = module.parent;
+        for (;traveler;traveler = traveler.parent){
+            var o = nodeResolve(path, traveler.filename);
+            if(o) return o.src;
+        }
+        return null;
+    }
+
 	/* get file by path, local or http(s) */
 	function getFile(filePath, config, callback){
-    
 		var source = _.last(filePath.split('!'));
 		var pluginPaths = _.without(_.initial(filePath.split('!')), source);
 		api.require(pluginPaths, function(){
@@ -118,7 +117,6 @@ module.exports = function(globalConfig){
 				});
 				config.deps = _.difference(config.deps, config.context, obj.visited);
 				async.each(config.deps, function(depPath, depDone){
-					obj.visited.push(depPath);
 					getFile(depPath, config, function(e, js, remote, plugins){
 						if(e) depDone(e);
 						else{
@@ -176,8 +174,9 @@ module.exports = function(globalConfig){
 							});
 														
 							obj.configs[depPath] = specificConfig;
-														
+									
 							obj.newStart(depConfig, each, function(e){
+								obj.visited.push(depPath);
 								each(depPath, js, depConfig);
 								depDone(e);
 							});
