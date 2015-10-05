@@ -105,6 +105,7 @@ module.exports = function(globalConfig){
 	function trace(isBuild){
 		var obj = {
 			visited : [],
+			complete : [],
 			configs : {},
 			newStart : function(config, each, complete){
 				config.context = config.context||[];
@@ -117,6 +118,7 @@ module.exports = function(globalConfig){
 				});
 				config.deps = _.difference(config.deps, config.context, obj.visited);
 				async.each(config.deps, function(depPath, depDone){
+					obj.visited.push(depPath);
 					getFile(depPath, config, function(e, js, remote, plugins){
 						if(e) depDone(e);
 						else{
@@ -176,14 +178,14 @@ module.exports = function(globalConfig){
 							obj.configs[depPath] = specificConfig;
 									
 							obj.newStart(depConfig, each, function(e){
-								obj.visited.push(depPath);
+								obj.complete.push(depPath);
 								each(depPath, js, depConfig);
 								depDone(e);
 							});
 						}
 					});
 				}, function(e){
-					complete(e, obj.visited, obj.configs);
+					complete(e, obj.complete, obj.configs);
 				});
 			}
 		}
