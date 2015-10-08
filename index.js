@@ -143,6 +143,15 @@ module.exports = function(globalConfig){
 																																			
 							if(depConfig.export){
 								js = 'define((function(){'+js+'\nreturn '+depConfig.export+'})());';
+							}else if(depConfig.amd){
+				                js = parse(js, function(node){
+				                    eswalk(node, function(child){
+    									if(child.callee && child.callee.name == 'define') child.callee.name = 'amd';
+    									if(child.name == 'define') child.name = 'amd';
+    								});
+				                    return node;
+				                });
+				                js = 'define((function(){amdModules = {};'+js+' return amdModules["'+depConfig.amd+'"]})());'
 							}else js = parse(js, function(node){
 								node.body = _.filter(node.body, function(statement){
 									var isDefine = statement.expression && statement.expression.type == 'CallExpression' && statement.expression.callee.name == 'define';
@@ -174,7 +183,7 @@ module.exports = function(globalConfig){
 								});
 								return node;
 							});
-														
+																					
 							obj.configs[depPath] = specificConfig;
 									
 							obj.newStart(depConfig, each, function(e){
@@ -206,7 +215,8 @@ module.exports = function(globalConfig){
 				var js = '';
 				if(!pathConfig.remote || pathConfig.include) js = parse(rawjs, function(node){
 					node.body = _.each(node.body, function(statement){
-							statement.expression.arguments.unshift({type: 'Literal', value: path});
+							if(statement.expression.callee && statement.expression.callee.name == 'define')
+				                statement.expression.arguments.unshift({type: 'Literal', value: path});
 					});
 					return node;
 				});
