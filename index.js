@@ -33,7 +33,8 @@ module.exports = function(globalConfig){
 			async.reduce(plugins, source, function(memo, plugin, done){
 				var pluginNormalize = plugin.normalize||_.identity;
 				done(null, pluginNormalize(memo));
-			}, function(e, source){
+			}, function(e, normedPath){
+			    source = normedPath;
 				if(e) callback(e);
 				else if(source.match(/^http(s)*:\/\//)) request(source, function(e,r,body){
 					transform(e, body, true); //callback saying its remote
@@ -50,7 +51,7 @@ module.exports = function(globalConfig){
 					if(_.isFunction(transform)) transform(memo, source, transformed);
 					else transformed(null, memo);
 				}, function(e, js){
-					callback(e, js, remote, _.object(pluginPaths, plugins));
+					callback(e, source, js, remote, _.object(pluginPaths, plugins));
 				});
 			}
 		});	
@@ -119,7 +120,7 @@ module.exports = function(globalConfig){
 				config.deps = _.difference(config.deps, config.context, obj.visited);
 				async.each(config.deps, function(depPath, depDone){
 					obj.visited.push(depPath);
-					getFile(depPath, config, function(e, js, remote, plugins){
+					getFile(depPath, config, function(e, normedPath, js, remote, plugins){
 						if(e) depDone(e);
 						else{
 							var depConfig = {
@@ -127,7 +128,7 @@ module.exports = function(globalConfig){
 								deps : [],
 								remote : !!remote,
 								isBuild : isBuild,
-								context : config.context.concat(depPath)
+								context : config.context.concat(normedPath)
 							};
 							
 							var specificConfig = {};
