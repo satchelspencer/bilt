@@ -137,7 +137,7 @@ module.exports = function(globalConfig){
 								depConfig[key] = val;
 								specificConfig[key] = val;
 							});
-														
+																					
 							if(_.keys(plugins).length) _.each(plugins, function(plugin, pluginPath){
 								if(_.has(plugin, 'init')) depConfig.deps.push(pluginPath);
 							});
@@ -166,6 +166,11 @@ module.exports = function(globalConfig){
 											if(inlineConfig.paths) _.each(inlineConfig.paths, function(value, path){
 												depConfig.paths[path] = value;
 											});
+											if(inlineConfig.factory) statement.expression.arguments.push({
+                                                type : "Literal",
+                                                value : true,
+                                                raw : "true"
+                                            });
 										}
 									}
 									return isDefine;
@@ -250,9 +255,11 @@ module.exports = function(globalConfig){
 				return getNormalizer(conf)(path);
 			});
 			var rconf = {};
+			var factories = [];
 			trace().newStart(conf, function(path, js, pathConfig){
 				_.extend(rconf, pathConfig);
-				function define(value){
+				function define(value, factory){
+				    if(factory) factories = _.uniq(factories.concat(path));
 					api.modules[path] = value;
 					if(_.contains(normalizedPaths, path)) api.modules[path] = require(path);
 				}
@@ -260,6 +267,7 @@ module.exports = function(globalConfig){
 					var plugins = path.split('!');
 					var rpath = plugins.pop();
 					var value = api.modules[path];
+					if(_.contains(factories, path)) value = value();
 					return _.reduce(_.map(plugins, function(pluginPath){
 						return api.modules[pluginPath];
 					}), function(memo, plugin){
