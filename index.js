@@ -211,6 +211,8 @@ module.exports = function(globalConfig){
 		config : globalConfig,
 		plugins : {},
 		modules : {},
+		factories : [],
+		complete : [],
 		build : function(paths, init, callback){
 			var build = "";
 			var conf = {
@@ -255,24 +257,27 @@ module.exports = function(globalConfig){
 				return getNormalizer(conf)(path);
 			});
 			var rconf = {};
-			var factories = [];
 			trace().newStart(conf, function(path, js, pathConfig){
 				_.extend(rconf, pathConfig);
 				function define(value, factory){
-				    if(factory) factories = _.uniq(factories.concat(path));
+				    if(factory) api.factories.push(path);
 					api.modules[path] = value;
 					if(_.contains(normalizedPaths, path)) api.modules[path] = require(path);
 				}
 				function require(path){
 					var plugins = path.split('!');
 					var rpath = plugins.pop();
-					var value = api.modules[path];
-					if(_.contains(factories, path)) value = value();
-					return _.reduce(_.map(plugins, function(pluginPath){
-						return api.modules[pluginPath];
-					}), function(memo, plugin){
-						return plugin?plugin.init(memo):memo;
-					}, value);
+					if(!_.contains(api.complete, path)){
+					    var initalizers = _.compact(_.map(plugins, function(pluginPath){
+    				        return api.modules[pluginPath].init;
+    				    }));
+					   if(_.contains(api.factories, path)) api.modules[path] = api.modules[path]();
+					   api.modules[path] =  _.reduce(initalizers, function(memo, initalizer){
+    						return initalizer(memo);
+    					}, api.modules[path]);
+					   api.complete.push(path);
+					}
+					return api.modules[path];
 				}
 				function browser(){
 					return null;
