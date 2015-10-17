@@ -155,24 +155,31 @@ module.exports = function(globalConfig){
 				                js = 'define((function(){amdModules = {};'+js+' return amdModules["'+depConfig.amd+'"]})());'
 							}else js = parse(js, function(node){
 								node.body = _.filter(node.body, function(statement){
-									var isDefine = statement.expression && statement.expression.type == 'CallExpression' && statement.expression.callee.name == 'define';
+									var isDefine = statement.expression && 
+								        statement.expression.type == 'CallExpression' && 
+								        (statement.expression.callee.name == 'define' || statement.expression.callee.name == 'factory');									
+									
+									if(isDefine && statement.expression.callee.name == 'factory'){
+							            specificConfig.factory = true;
+							            statement.expression.callee.name = 'define';
+							        }
+							        
 									if(isDefine && statement.expression.arguments.length == 2){
 										var inlineConfig = statement.expression.arguments.shift();
 										inlineConfig = eval('('+escodegen.generate(inlineConfig)+')');
-										if(_.isArray(inlineConfig)) depConfig.deps = _.uniq(depConfig.deps.concat(inlineConfig));
-										else if(_.isObject(inlineConfig)){
-											specificConfig = _.extend(specificConfig, inlineConfig);
-											if(inlineConfig.deps) depConfig.deps = _.uniq(depConfig.deps.concat(inlineConfig.deps));
-											if(inlineConfig.paths) _.each(inlineConfig.paths, function(value, path){
-												depConfig.paths[path] = value;
-											});
-											if(inlineConfig.factory) statement.expression.arguments.push({
-                                                type : "Literal",
-                                                value : true,
-                                                raw : "true"
-                                            });
-										}
+										if(_.isArray(inlineConfig)) inlineConfig = {deps : _.uniq(depConfig.deps.concat(inlineConfig))};										
+										specificConfig = _.extend(specificConfig, inlineConfig);
 									}
+									
+									if(specificConfig.deps) depConfig.deps = _.uniq(depConfig.deps.concat(inlineConfig.deps));
+									if(specificConfig.paths) _.each(inlineConfig.paths, function(value, path){
+										depConfig.paths[path] = value;
+									});
+									if(specificConfig.factory) statement.expression.arguments.push({
+                                        type : "Literal",
+                                        value : true,
+                                        raw : "true"
+                                    });
 									return isDefine;
 								});
 								var requireNormalizer = getNormalizer(depConfig);
