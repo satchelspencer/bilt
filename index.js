@@ -143,7 +143,11 @@ module.exports = function(globalConfig){
 							});
 																																			
 							if(depConfig.export){
-								js = 'define((function(){'+js+'\nreturn '+depConfig.export+'})());';
+				                var exportDeps = _.map(depConfig.deps, function(dep){
+				                    var exp = depConfig.paths[dep]&&depConfig.paths[dep].export;
+				                    return exp?"var "+exp+" = require('"+getNormalizer(depConfig)(dep)+"');":'';
+				                }).join('\n');
+								js = 'define(function(){'+exportDeps+'\n'+js+'\n return '+depConfig.export+';}, true);';
 							}else if(depConfig.amd){
 				                js = parse(js, function(node){
 				                    eswalk(node, function(child){
@@ -171,8 +175,8 @@ module.exports = function(globalConfig){
 										specificConfig = _.extend(specificConfig, inlineConfig);
 									}
 									
-									if(specificConfig.deps) depConfig.deps = _.uniq(depConfig.deps.concat(inlineConfig.deps));
-									if(specificConfig.paths) _.each(inlineConfig.paths, function(value, path){
+									if(specificConfig.deps) depConfig.deps = _.uniq(depConfig.deps.concat(specificConfig.deps));
+									if(specificConfig.paths) _.each(specificConfig.paths, function(value, path){
 										depConfig.paths[path] = value;
 									});
 									if(specificConfig.factory) statement.expression.arguments.push({
@@ -267,9 +271,11 @@ module.exports = function(globalConfig){
 			trace().newStart(conf, function(path, js, pathConfig){
 				_.extend(rconf, pathConfig);
 				function define(value, factory){
-				    if(factory) api.factories.push(path);
-					api.modules[path] = value;
-					if(_.contains(normalizedPaths, path)) api.modules[path] = require(path);
+				    if(!_.has(api.modules, path)){
+				        if(factory) api.factories.push(path);
+				        api.modules[path] = value;
+					    if(_.contains(normalizedPaths, path)) api.modules[path] = require(path);
+				    }
 				}
 				function require(path){
 					var plugins = path.split('!');
@@ -278,7 +284,7 @@ module.exports = function(globalConfig){
 					    var initalizers = _.compact(_.map(plugins, function(pluginPath){
     				        return api.modules[pluginPath].init;
     				    }));
-					   if(_.contains(api.factories, path)) api.modules[path] = api.modules[path]();
+					   if(_.contains(api.factories, path)) api.modules[path] = api.modules[path].call(global);
 					   api.modules[path] =  _.reduce(initalizers, function(memo, initalizer){
     						return initalizer(memo);
     					}, api.modules[path]);
