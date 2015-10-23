@@ -1,48 +1,85 @@
 # bilt
 javascript module loader/build tool for briding the gap between server and client side
- - [`module format`](#module-definition)
- - [`node usage`](#node-usage)
+ - [`api`](#API) 
+ - [`defining modules`](#module-definition)
+ - [`factory modules`](#factory-modules)
+ - [`module dependencies`](#module-dependencies)
+ - [`path resolution`](#path-resolution)
+ - [`compatability`](#compatability)
  - [`configuration`](#configuration-options)
  - [`plugins`](#plugins)
  - [`environment`](#environmnent-exclusion)
  - [`dependencies`](#dependencies)
 
-## module definition
-each module is a javascript file with a call to `define` passing any javascript you like
+## API
+create a new instace of built with a [`config object`](#configuration-options)
 ~~~ Javascript
-//mystring.js
-define('im a string');
+var bilt = require('bilt');
+var configObject = {};
+var myProject = bilt(configObject);
 ~~~
+
+`bilt.require(paths, callback)` require paths and callback in-order as arguments.
 ~~~ Javascript
-//myfn.js
+myProject.require(['mymod.js'], function(mymod){
+ 
+});
+~~~
+
+`bilt.build(paths, init, callback)` create a javascript file from required paths, and call back with source. init is called at runtime
+~~~ Javascript
+myProject.build(['mymod.js'], function(mymod){
+   mymod();
+}, function(e, source){
+  console.log('build complete', e, source);
+})
+~~~
+
+## module definition
+each module is a javascript file with a call to `define` passing any javascript value you like: functions, literals, etc. unlike AMD, functions are not factory functions, and will not be evaluated as a function, [unless you want to...](#factory-modules)
+~~~ Javascript
+//define a function
 define(function(a){
   return a.toUpperCase();
 });
 ~~~
-modules can make calls to `require` to load eachother
+~~~ Javascript
+//object
+define({
+  myProp : 9923,
+  myFn : function(a){
+    return a+3;
+  }
+});
+~~~
+~~~ Javascript
+//not sure why you would do this
+define('im a string');
+~~~
+
+## factory modules
+you **can** make a module behave like a factory bu defining it with the `factory` function. It will be used to build the value of the module **once**. The value passed to `factory` must be a function.
+~~~ Javascript
+factory(function(){
+  var something = require('something');
+  return something+5;
+});
+~~~
+
+## module dependencies 
+modules can make calls to `require` to load eachother. all references to each module are shallow copies: a change to one reference to the module manifests across all its refernces. if this is not desired, consider using a function as a constructor to return new copies of the module.
 ~~~ Javascript
 define(function(){
-  //mymod.js
   var mystring = require('./mystring.js');
   var myfn = require('./myfn.js');
   console.log(myfn(mystring)); /* log: IM A STRING */
-});
-~~~
-modules executing in the node environment may call `nodeRequire`
-~~~ Javascript
-define(function(path){
-  //nodeModule.js
-  var fs = nodeRequire('fs');
-  return fs.statSync(path);
 });
 ~~~
 you can optionally include a config parameter in the define function, as an array of dependencies to include:
 ~~~ Javascript
 define(['some_dep.js'], 'my module');
 ~~~
-or as a config object with properties:
- - `deps` array of paths to be required
- - `paths` paths config (see [`configuration`](#configuration-options)) to be applied to module and all of its children
+or as a [`config object:`](#configuration-options)
 
 ~~~ Javascript
 define({
@@ -58,26 +95,22 @@ define({
 });
 ~~~
 
+## path resoultion
+all paths are relative to the script calling `require` or `build`. a path to a module is resolved with the following process:
+ 1. `evaluate plugins` for each plugin specified in the path, call its `normalize` to determine the final pathof the module.
+ 2. `paths rewrite` if the path has an entry in the [configuration options](#configuration-options) rewrite the path accordingly.
+ 3. `platform check` if a `nodePath` is specified and the module is to be executed in node, use it.
+ 4. `try open localy` check to see if the path exists locally.
+ 5. `try open remotely` check to see if it can be loaded from a remote server;
+ 6. `catch resolve again` if path is not found start at step `2` and try to re-resolve it. (this is required if references are multiple levels deep. not that you should do that). continue re-resolving untill it creates a circular reference.
+ 7. `look in node_modules` if all other resolution has failed, look for the file as if it were the path to a node module.
+ 8. `resoultion failed` path was not found, throw that error
 
-## node usage
-create a new instace of built with a [`config object`](#configuration-options)
-~~~ Javascript
-var bilt = require('bilt');
-var configObject = {};
-var myProject = bilt(configObject);
-~~~
-
-~~~ Javascript
-myProject.require(['mymod.js'], function(mymod){
-  mymod(); /* log: IM A STRING */
-});
-
-myProject.build(['mymod.js'], function(mymod){
-   mymod();
-}, function(e, source){
-  console.log('build complete', e, source);
-})
-~~~
+## compatability
+bilt can include non standard modules:
+ - `raw javascript` using the `export` config option, built will evaluate the script in a closure and return the global variable as defined.
+ - `node modules` in any bilt module, calls to `nodeRequire` will load the node module relative to the parent as `require` would in a commonJS module.
+ - `AMD` using the `amd` config option, specify the name of the defined amd module to be returned. Note, this is not a replacement for requireJS and will not resolve paths or load dependencies of the amd module. It is intended for loading completed builds for an external dependancy.
 
 ## configuration options
 passed as an object with *any* of the following properties:
@@ -85,7 +118,7 @@ passed as an object with *any* of the following properties:
    - `source` path from which to load module.
    - `deps` array of paths the module is dependent on.
    - `export` specify what variable to export for standard javascript files.
-   - `include` boolean (build only) to include in build or load externally.
+   - `amd` string of amd module to export from file
    - `nodePath` specify separate path to require instead when executing in the node environment
    - `minify` bool if to minify just this module
    - *examples*
@@ -97,7 +130,7 @@ passed as an object with *any* of the following properties:
       ~~~ Javascript
        //with options
       'jquery' : {
-         source : 'https://code.jquery.com/jquery-1.11.3.min.js',
+        source : 'https://code.jquery.com/jquery-1.11.3.min.js',
         export : '$'
       }
       ~~~
@@ -150,3 +183,4 @@ this is especially useful in plugins with an init step that will only be run on 
  - [`esprima-walk`](https://github.com/jrajav/esprima-walk) iterates over expressions in an esprima object
  - [`escodegen`](https://github.com/estools/escodegen) generates source from esprima object
  - [`parent-require`](https://github.com/jaredhanson/node-parent-require) nodrequires up the dependency tree
+ - [`require-resolve`](https://github.com/qiu8310/require-resolve) finds the absolute path from a node module name
