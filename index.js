@@ -1,5 +1,5 @@
 var fs = require('fs-extra');
-var path = require('path');
+var nodePath = require('path');
 var async = require('async');
 var findRequires = require('find-requires');
 var request = require('request');
@@ -11,285 +11,252 @@ var escodegen = require('escodegen');
 var prequire = require('parent-require');
 var nodeResolve = require('require-resolve');
 
-module.exports = function(globalConfig){
-	globalConfig.paths = globalConfig.paths||{};
-	globalConfig.paths.noop = path.join(__dirname, 'lib/noop.js');
-			
-	function resolve(path){
-        var traveler = module.parent;
-        for (;traveler;traveler = traveler.parent){
-            var o = nodeResolve(path, traveler.filename);
-            if(o) return o.src;
-        }
-        return null;
-    }
+module.exports = function(config){
+	config = config||{};
+	config.paths = config.paths||{};
+	config.deps = config.deps||[];
+	config.minify = !!config.minify; //def false
+	config.context = config.context||[];
 
-	/* get file by path, local or http(s) */
-	function getFile(filePath, config, callback){
-		var source = _.last(filePath.split('!'));
-		var pluginPaths = _.without(_.initial(filePath.split('!')), source);
-		api.require(pluginPaths, function(){
-			var plugins = arguments;
-			async.reduce(plugins, source, function(memo, plugin, done){
-				var pluginNormalize = plugin.normalize||_.identity;
-				done(null, pluginNormalize(memo));
-			}, function(e, normedPath){
-			    source = normedPath;
-				if(e) callback(e);
-				else if(source.match(/^http(s)*:\/\//)) request(source, function(e,r,body){
-					transform(e, body, true); //callback saying its remote
-				});
-				else if(fs.statSync(source).isDirectory()) transform(null, _.map(fs.readdirSync(source), function(subPath){
-					return path.join(source, subPath);
-				}));
-				else fs.readFile(source, 'utf8', transform);
-			});
-			function transform(e, raw, remote){
-				if(e) callback(e);
-				else async.reduce(plugins, raw, function(memo, plugin, transformed){
-					var transform = plugin.transform||plugin;
-					if(_.isFunction(transform)) transform(memo, source, transformed);
-					else transformed(null, memo);
-				}, function(e, js){
-					callback(e, source, js, remote, _.object(pluginPaths, plugins));
-				});
-			}
-		});	
+	var modules = {};
+
+	function resolveNodePath(path){
+		var traveler = module.parent;
+		for (;traveler;traveler = traveler.parent){
+			var o = nodeResolve(path, traveler.filename);
+			if(o) return o.src;
+		}
+		return null;
 	}
-	
-	function parse(js, transformer){
-		var parse = esprima.parse(js);
-		return escodegen.generate(transformer(parse));
-	}
-	
-	function getNormalizer(config){
-		var invert = _.reduce(config.paths, function(memo, path, alias){
-			if(path.nodePath){
-				memo[path.nodePath] = alias;
-				memo[path.source||path] = alias;
+
+	function normalize(path, config, isBuild){
+		var parts = path.split('!');
+		function n(path, context){
+			if(_.contains(context, path)) return path; //no new info on iteration. return
+			else context.push(path);
+			/* normalize configured aliases */
+			var pathConfig = config.paths[path];
+			if(pathConfig){
+				if(_.isString(pathConfig)) path = pathConfig;
+				else{ //if build, use node
+					if(pathConfig.source) path = pathConfig.source;
+					if(!isBuild && pathConfig.nodePath) path = pathConfig.nodePath;
+				}
 			}
-			return memo;
-		}, {});
-		function norm(path, pathContext){
-			pathContext = (pathContext||[]).concat(path);
-			var current = _.last(config.context);
-			return _.map(path.split('!'), function(path){
-				if(invert[path]) path = invert[path];
-				if(current) path = path.replace(/^\.\//, _.last(current.split('!')).match(/(.+)\/.+/)[1]+'/');
-				var pathConfig = config.paths[path];
-				if(pathConfig){
-					if(_.isString(pathConfig)) path = pathConfig;
+			/* normalize relative path */
+			if(path.match(/^\.\//) && config.context.length){
+				path = nodePath.join(nodePath.dirname(_.last(_.last(config.context).split('!'))), path);
+			}
+			path = resolveNodePath(path)||path; //if available resolve node path
+			return n(path, context);
+		}
+		/* normalize each part individually */
+		return _.map(parts, function(part){
+			return n(part, []);
+		}).join('!');
+		
+	}
+
+	/* oversimplified, works for now */
+	function extendConfigs(dest, src){
+		_.each(src, function(val, prop){
+			if(prop == 'deps') dest.deps = _.uniq(dest.deps.concat(val));
+			else if(prop == 'paths') _.extend(dest.paths, val);
+			else dest[prop] = val;
+		})
+	}
+
+	/* if source is a directory call back with the absolute paths of all its contents, otherwise open */
+	function open(source, callback){
+		try{
+			var stat = fs.statSync(source);
+			if(fs.statSync(source).isDirectory()) callback(null, _.map(fs.readdirSync(source), function(subPath){
+				return nodePath.join(source, subPath);
+			}))
+			else fs.readFile(source, 'utf8', callback);
+		}catch(e){
+			callback(e);
+		}
+	}
+
+	var visited = {
+		build : [],
+		require : []
+	};
+
+	function trace(traceConfig, eachModule, traceComplete, isBuild){
+		traceConfig.paths = traceConfig.paths||{};
+		traceConfig.deps = traceConfig.deps||[];
+		traceConfig.context = traceConfig.context||[];
+		/* depthify normalized configs */
+		var normalizedConfigs = {};
+		_.each(traceConfig.paths, function(pathConfig, path){
+			var normalizedPath = normalize(path, traceConfig, isBuild);
+			normalizedConfigs[normalizedPath] = normalizedConfigs[normalizedPath]||{};
+			var normalizedConfig = normalizedConfigs[normalizedPath];
+			/* only extend one level deep, but smartly */
+			if(_.isString(pathConfig)) normalizedConfig.source = pathConfig;
+			else _.extend(normalizedConfig, _.omit(pathConfig, 'source', 'nodePath'));
+		});
+		/* for each dep */
+		async.eachSeries(traceConfig.deps, function(traceDepPath, traceDepComplete){
+			traceDepPath =  normalize(traceDepPath, traceConfig, isBuild);  //normalize path
+			var plugins = traceDepPath.split('!');
+			var filePath = plugins.pop();
+			if(_.contains(visited[isBuild?'build':'require'], traceDepPath)) traceDepComplete(); //already done, skip 'er
+			else{
+				visited[isBuild?'build':'require'].push(traceDepPath); //add er to donesies
+				var pluginTrace = JSON.parse(JSON.stringify(traceConfig));
+				pluginTrace.deps = plugins;
+				api.require(pluginTrace, function(e, pluginModules){
+					if(e) traceDepComplete(e);
 					else{
-						if(pathConfig.source) path = pathConfig.source;
-						if(!config.isBuild && pathConfig.nodePath) path = pathConfig.nodePath;
+						var pluginPrefix = _.keys(pluginModules).concat('').join('!');
+						open(filePath, function(e, raw){
+							if(e) traceDepComplete('failed to open: '+filePath);
+							else{
+								/* transform raw by plugins */
+								async.reduce(_.keys(pluginModules), raw, function(memo, pluginPath, transformDone){
+									var transform = pluginModules[pluginPath].transform||pluginModules[pluginPath];
+									if(_.isFunction(transform)) transform(memo, filePath, transformDone);
+									else transformDone(null, memo);
+								}, function(e, raw){
+									filePath = pluginPrefix+filePath; //add plugins back to filename
+									try{ var parse = esprima.parse(raw); }catch(e){
+										traceDepComplete(filePath+': '+e);
+									}
+									if(parse){
+										var ownConfig = normalizedConfigs[filePath]||{};
+										ownConfig.deps = ownConfig.deps||[];
+										ownConfig.paths = ownConfig.paths||{};
+										var newTraceConfig = JSON.parse(JSON.stringify(traceConfig));
+										newTraceConfig.deps = ownConfig.deps; 
+										newTraceConfig.context.push(filePath);
+										/* find what plugins will be needed at runtime */
+										var neededPlugins = _.filter(_.keys(pluginModules), function(pluginPath){
+											return _.has(pluginModules[pluginPath], 'init');
+										})
+										newTraceConfig.deps = _.uniq(newTraceConfig.deps.concat(neededPlugins)); //add needed plugins as deps
+										if(ownConfig.export){
+											/* shim from export variable */
+											var exportDeps = _.map(ownConfig.deps, function(ownDep){
+												var normOwnDep = normalize(ownDep, traceConfig, isBuild);
+												var exp = normalizedConfigs[normOwnDep] && normalizedConfigs[normOwnDep].export;
+												return exp?"var "+exp+" = require('"+normOwnDep+"');":'';
+											}).join('\n');
+											parse = esprima.parse('define({factory : true}, function(){'+exportDeps+'\n'+escodegen.generate(parse)+'\n return '+ownConfig.export+';});');
+										}else if(ownConfig.amd){
+											/* compatabilize, replace define with amd */
+											eswalk(parse, function(child){
+												if(child.callee && child.callee.name == 'define') child.callee.name = 'amd';
+												if(child.name == 'define') child.name = 'amd';
+											});
+											parse = esprima.parse('define({factory : true}, function(){return (function(){amdModules = {};'+escodegen.generate(parse)+' return amdModules["'+ownConfig.amd+'"]})()});');
+										}
+										eswalk(parse, function(child){
+											if(child.type == 'CallExpression' && child.callee.name == 'define'){
+												/* 2 args means inline config, remove and extend into ownConfig */
+												if(child.arguments.length == 2){
+													var inlineConfig = eval('('+escodegen.generate(child.arguments.shift())+')');
+													if(_.isArray(inlineConfig)) inlineConfig = {deps : _.uniq(ownConfig.deps.concat(inlineConfig))};										
+													extendConfigs(ownConfig, inlineConfig); //inherit to ownConfig
+													extendConfigs(newTraceConfig, ownConfig);
+												}
+												/* wrap it in a return function */
+												child.arguments[0] = {
+													type: 'FunctionExpression',
+													id: null,
+													params: [],
+													defaults: [],
+													body : {
+														type : 'BlockStatement',
+														body : [{
+															type : 'ReturnStatement',
+															argument : child.arguments[0]
+														}]
+													},
+													generator: false,
+													expression: false
+												};
+											}else if(child.type == 'CallExpression' && ( //environment exclusion fns
+											  (child.callee.name == 'browser' && !isBuild) ||
+											  (child.callee.name == 'node' && isBuild)
+											)) child.arguments = [];
+											else if(
+												child.type == 'CallExpression' &&
+												child.callee.name == 'require' &&
+												child.arguments[0] &&
+												child.arguments[0].type == 'Literal'
+											){ //find all our deps
+												var dep = child.arguments[0].value
+												ownConfig.deps = _.uniq(ownConfig.deps.concat(dep));
+												child.arguments[0].value = normalize(dep, newTraceConfig, isBuild);
+											}
+										});
+										/* extend again to include required paths */
+										extendConfigs(newTraceConfig, ownConfig);
+										ownConfig.deps = _.map(ownConfig.deps, function(ownDep){
+											return normalize(ownDep, newTraceConfig, isBuild);
+										});
+										/* clean up ownconfig */
+										if(!ownConfig.deps.length) delete ownConfig.deps;
+										if(!_.keys(ownConfig.paths).length) delete ownConfig.paths;
+										delete ownConfig.source;
+										/* now that all deps are in, add ownconfigs at front */
+										eswalk(parse, function(child){
+											if(child.type == 'CallExpression' && child.callee.name == 'define'){
+												var parsedOwnConfig = esprima.parse('('+JSON.stringify(ownConfig)+')').body[0].expression;
+												child.arguments.unshift(parsedOwnConfig);
+												child.arguments.unshift(esprima.parse("'"+filePath+"'").body[0].expression);
+											}
+										})
+										var js = escodegen.generate(parse); //final js
+										/* fetching a property from newTraceConfig makes it inheritable */
+										if(newTraceConfig.minify) js = uglify.minify(js, {fromString: true}).code;
+										trace(newTraceConfig, eachModule, function(e){
+											eachModule(filePath, js, ownConfig);
+											traceDepComplete(e);
+										}, isBuild);
+									}
+								});
+							}
+						})
 					}
-				}
-				/* path is now its final value */
-				var exists = !!path.match(/^http(s)*:\/\//);
-				if(!exists) try{
-					exists = !!fs.statSync(path);
-				}catch(e){}
-				if(!exists){
-					if(_.contains(pathContext, path)){
-				        var resolved = resolve(path);
-				        if(resolved) path = resolved;
-					    else throw 'path "'+path+'" failed to resolve';
-				    }
-					path = norm(path, pathContext);
-				}
-				return path;
-			}).join('!');
-		}
-		return norm;
-	}
-	
-	function trace(isBuild){
-		var obj = {
-			visited : [],
-			complete : [],
-			configs : {},
-			newStart : function(config, each, complete){
-				config.context = config.context||[];
-				var depsConfigs = {};
-				config.isBuild = isBuild;
-				config.deps = _.map(config.deps, function(path){
-					var n = getNormalizer(config)(path);
-					if(config.paths[path] && config.paths[path].source) depsConfigs[n] = config.paths[path];
-					return n;
-				});
-				config.deps = _.difference(config.deps, config.context, obj.visited);
-				async.each(config.deps, function(depPath, depDone){
-					obj.visited.push(depPath);
-					getFile(depPath, config, function(e, normedPath, js, remote, plugins){
-						if(e) depDone(e);
-						else{
-							var depConfig = {
-								paths : JSON.parse(JSON.stringify(config.paths)),
-								deps : [],
-								remote : !!remote,
-								isBuild : isBuild,
-								context : config.context.concat(normedPath)
-							};
-							
-							var specificConfig = {};
-							
-							if(depsConfigs[depPath]) _.each(depsConfigs[depPath], function(val, key){
-								depConfig[key] = val;
-								specificConfig[key] = val;
-							});
-																					
-							if(_.keys(plugins).length) _.each(plugins, function(plugin, pluginPath){
-								if(_.has(plugin, 'init')) depConfig.deps.push(pluginPath);
-							});
-																																			
-							if(depConfig.export){
-				                var exportDeps = _.map(depConfig.deps, function(dep){
-				                    var exp = depConfig.paths[dep]&&depConfig.paths[dep].export;
-				                    return exp?"var "+exp+" = require('"+getNormalizer(depConfig)(dep)+"');":'';
-				                }).join('\n');
-								js = 'define(function(){'+exportDeps+'\n'+js+'\n return '+depConfig.export+';}, true);';
-							}else if(depConfig.amd){
-				                js = parse(js, function(node){
-				                    eswalk(node, function(child){
-    									if(child.callee && child.callee.name == 'define') child.callee.name = 'amd';
-    									if(child.name == 'define') child.name = 'amd';
-    								});
-				                    return node;
-				                });
-				                js = 'define((function(){amdModules = {};'+js+' return amdModules["'+depConfig.amd+'"]})());'
-							}else js = parse(js, function(node){
-								node.body = _.filter(node.body, function(statement){
-									var isDefine = statement.expression && 
-								        statement.expression.type == 'CallExpression' && 
-								        (statement.expression.callee.name == 'define' || statement.expression.callee.name == 'factory');									
-									
-									if(isDefine && statement.expression.callee.name == 'factory'){
-							            specificConfig.factory = true;
-							            statement.expression.callee.name = 'define';
-							        }
-							        
-									if(isDefine && statement.expression.arguments.length == 2){
-										var inlineConfig = statement.expression.arguments.shift();
-										inlineConfig = eval('('+escodegen.generate(inlineConfig)+')');
-										if(_.isArray(inlineConfig)) inlineConfig = {deps : _.uniq(depConfig.deps.concat(inlineConfig))};										
-										specificConfig = _.extend(specificConfig, inlineConfig);
-									}
-									
-									if(specificConfig.deps) depConfig.deps = _.uniq(depConfig.deps.concat(specificConfig.deps));
-									if(specificConfig.paths) _.each(specificConfig.paths, function(value, path){
-										depConfig.paths[path] = value;
-									});
-									if(specificConfig.factory) statement.expression.arguments.push({
-                                        type : "Literal",
-                                        value : true,
-                                        raw : "true"
-                                    });
-									return isDefine;
-								});
-								var requireNormalizer = getNormalizer(depConfig);
-								eswalk(node, function(child){
-									if(child.type == 'CallExpression' && (
-									  (child.callee.name == 'browser' && !isBuild) ||
-									  (child.callee.name == 'node' && isBuild)
-									)) child.arguments = [];
-									else if(child.type == 'CallExpression' && child.callee.name == 'require'){
-										var dep = child.arguments[0].value
-										depConfig.deps = _.uniq(depConfig.deps.concat(dep));
-										child.arguments[0].value = requireNormalizer(dep);
-									}
-								});
-								return node;
-							});
-																					
-							obj.configs[depPath] = specificConfig;
-									
-							obj.newStart(depConfig, each, function(e){
-								obj.complete.push(depPath);
-								each(depPath, js, depConfig);
-								depDone(e);
-							});
-						}
-					});
-				}, function(e){
-					complete(e, obj.complete, obj.configs);
-				});
+				})
 			}
-		}
-		return obj; 
+		}, function(e){
+			traceComplete(e, _.uniq(visited[isBuild?'build':'require']));
+		})
 	}
-			
+
 	var api = {
-		config : globalConfig,
-		plugins : {},
 		modules : {},
-		factories : [],
-		complete : [],
-		build : function(paths, init, callback){
-			var build = "";
-			var conf = {
-				paths : api.config.paths,
-				deps : paths
-			};
-			trace(true).newStart(conf, function(path, rawjs, pathConfig){
-				var js = '';
-				if(!pathConfig.remote || pathConfig.include) js = parse(rawjs, function(node){
-					node.body = _.each(node.body, function(statement){
-							if(statement.expression.callee && statement.expression.callee.name == 'define')
-				                statement.expression.arguments.unshift({type: 'Literal', value: path});
-					});
-					return node;
-				});
-				else js = 'load(\''+path+'\', '+JSON.stringify(pathConfig.deps||[])+', false'+(pathConfig.export?', \''+pathConfig.export+'\'':'')+')';
-				if(pathConfig.minify) js = uglify.minify(js, {fromString: true}).code;
-				if(js.length) build += js+'\n\n'; 
-			}, function(e, loaded, configs){
-				if(e) callback(e);
-				else fs.readFile(path.join(__dirname, 'lib/client.js'), 'utf8', function(e, require){
-					require = uglify.minify(require, {fromString: true}).code;
-					var output = require+'\n\n'
-								 +build
-								 +escodegen.generate(esprima.parse('bilt.init('+init.toString()+', '+JSON.stringify(_.map(paths, function(spath){
-								 	return getNormalizer(conf)(spath);
-								 }))+')\n'));
-					if(!api.config.noMinify) output = uglify.minify(output, {fromString: true}).code;
-					callback(e, output, loaded, configs);
-				});
-			});	
-		},
-		require : function(paths, callback, showConfig){			
+		require : function(requireConfig, callback){
 			function nodeRequire(path){
 				return prequire(path);
 			}
-			var conf = {
-				paths : api.config.paths,
-				deps : paths
-			};
-			var normalizedPaths = _.map(paths, function(path){
-				return getNormalizer(conf)(path);
+			var ouputPaths = _.map(requireConfig.deps, function(path){
+				return normalize(path, requireConfig);
 			});
-			var rconf = {};
-			trace().newStart(conf, function(path, js, pathConfig){
-				_.extend(rconf, pathConfig);
-				function define(value, factory){
-				    if(!_.has(api.modules, path)){
-				        if(factory) api.factories.push(path);
-				        api.modules[path] = value;
-					    if(_.contains(normalizedPaths, path)) api.modules[path] = require(path);
-				    }
+			trace(requireConfig, function(path, js){
+				function define(path, pathConfig, getValue){
+					api.modules[path] = api.modules[path]||{}; //init the object for later shallow reference
+					var value = getValue(); //now compute value and sub-requires
+					if(pathConfig.factory) value = value(); //factories must go again
+					/* get plugins init transform */
+					var plugins = path.split('!'); plugins.pop(); //get plugins
+					var initalizers = _.compact(_.map(plugins, function(pluginPath){
+						return require(pluginPath).init;
+					}));
+					/* call all plugins init transforms */
+					value = _.reduce(initalizers, function(memo, initalizer){
+						return initalizer(memo);
+					}, value);
+					if(value.constructor == Object) api.modules[path] = _.extend(api.modules[path], value); //maintain shallow copy
+					else api.modules[path] = value; //otherwise just put it in as a static value
 				}
-				function require(path){
-					var plugins = path.split('!');
-					var rpath = plugins.pop();
-					if(!_.contains(api.complete, path)){
-					    var initalizers = _.compact(_.map(plugins, function(pluginPath){
-    				        return api.modules[pluginPath].init;
-    				    }));
-					   if(_.contains(api.factories, path)) api.modules[path] = api.modules[path].call(global);
-					   api.modules[path] =  _.reduce(initalizers, function(memo, initalizer){
-    						return initalizer(memo);
-    					}, api.modules[path]);
-					   api.complete.push(path);
-					}
+				function require(path){	
+					api.modules[path] = api.modules[path]||{};
 					return api.modules[path];
 				}
 				function browser(){
@@ -300,9 +267,27 @@ module.exports = function(globalConfig){
 				}
 				eval(js);
 			}, function(e, loaded){
-				if(showConfig) callback(e, loaded, rconf);
-				else callback.apply(this, _.values(_.pick(api.modules, normalizedPaths)));
-			});	
+				callback(e, _.pick(api.modules, ouputPaths));
+			})
+		},
+		build : function(buildConfig, init, callback){
+			var output = '';
+			trace(buildConfig, function(path, js){
+				if(js.length) output += js+'\n\n'; 
+			}, function(e, loaded){
+				/* if no problems include the minified client lib */
+				if(e) callback(e);
+				else fs.readFile(nodePath.join(__dirname, 'lib/client.js'), 'utf8', function(e, require){
+					require = uglify.minify(require, {fromString: true}).code; //minify it
+					output = require+'\n\n'
+									 +output //module's js
+									 +escodegen.generate(esprima.parse('bilt.init('+init.toString()+', '+JSON.stringify(_.map(buildConfig.deps, function(spath){
+										return normalize(spath, buildConfig, true);
+									 }))+')\n'));
+					if(buildConfig.minify) output = uglify.minify(output, {fromString: true}).code;
+					callback(e, loaded, output);
+				});
+			}, true)
 		}
 	}
 	return api;
