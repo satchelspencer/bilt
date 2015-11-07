@@ -19,6 +19,7 @@ module.exports = function(config){
 	config.context = config.context||[];
 
 	var modules = {};
+	var defineJs = fs.readFileSync(nodePath.join(__dirname, 'lib/define.js'));
 
 	function resolveNodePath(path){
 		var traveler = module.parent;
@@ -108,7 +109,7 @@ module.exports = function(config){
 				visited[isBuild?'build':'require'].push(traceDepPath); //add er to donesies
 				var pluginTrace = JSON.parse(JSON.stringify(traceConfig));
 				pluginTrace.deps = plugins;
-				api.require(pluginTrace, function(e, pluginModules){
+				bilt.require(pluginTrace, function(e, pluginModules){
 					if(e) traceDepComplete(e);
 					else{
 						var pluginPrefix = _.keys(pluginModules).concat('').join('!');
@@ -229,7 +230,9 @@ module.exports = function(config){
 		})
 	}
 
-	var api = {
+	var bilt = {
+		waiting : {},
+		complete : [],
 		modules : {},
 		require : function(requireConfig, callback){
 			function nodeRequire(path){
@@ -239,35 +242,20 @@ module.exports = function(config){
 				return normalize(path, requireConfig);
 			});
 			trace(requireConfig, function(path, js){
-				function define(path, pathConfig, getValue){
-					api.modules[path] = api.modules[path]||{}; //init the object for later shallow reference
-					var value = getValue(); //now compute value and sub-requires
-					if(pathConfig.factory) value = value(); //factories must go again
-					/* get plugins init transform */
-					var plugins = path.split('!'); plugins.pop(); //get plugins
-					var initalizers = _.compact(_.map(plugins, function(pluginPath){
-						return require(pluginPath).init;
-					}));
-					/* call all plugins init transforms */
-					value = _.reduce(initalizers, function(memo, initalizer){
-						return initalizer(memo);
-					}, value);
-					if(value.constructor == Object) api.modules[path] = _.extend(api.modules[path], value); //maintain shallow copy
-					else api.modules[path] = value; //otherwise just put it in as a static value
-				}
-				function require(path){	
-					api.modules[path] = api.modules[path]||{};
-					return api.modules[path];
-				}
 				function browser(){
 					return null;
 				}
 				function node(v){
 					return v;
 				}
-				eval(js);
+				eval(defineJs+js);
 			}, function(e, loaded){
-				callback(e, _.pick(api.modules, ouputPaths));
+				setTimeout(function(){
+					callback(e, _.mapObject(_.pick(bilt.modules, ouputPaths), function(val){
+					return val.value;
+				}));
+				}, 100)
+					
 			})
 		},
 		build : function(buildConfig, init, callback){
@@ -278,17 +266,19 @@ module.exports = function(config){
 				/* if no problems include the minified client lib */
 				if(e) callback(e);
 				else fs.readFile(nodePath.join(__dirname, 'lib/client.js'), 'utf8', function(e, require){
-					require = uglify.minify(require, {fromString: true}).code; //minify it
+					require = defineJs+'\n'+require;
+					//require = uglify.minify(require, {fromString: true}).code; //minify it
+					var initDeps = JSON.stringify(_.map(buildConfig.deps, function(spath){
+						return normalize(spath, buildConfig, true);
+					}));
 					output = require+'\n\n'
 									 +output //module's js
-									 +escodegen.generate(esprima.parse('bilt.init('+init.toString()+', '+JSON.stringify(_.map(buildConfig.deps, function(spath){
-										return normalize(spath, buildConfig, true);
-									 }))+')\n'));
+									 +escodegen.generate(esprima.parse('waitFor('+initDeps+', '+init.toString()+')\n'));
 					if(buildConfig.minify) output = uglify.minify(output, {fromString: true}).code;
 					callback(e, loaded, output);
 				});
 			}, true)
 		}
 	}
-	return api;
+	return bilt;
 };
