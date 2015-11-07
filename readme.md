@@ -12,11 +12,10 @@ javascript module loader/build tool for briding the gap between server and clien
  - [`dependencies`](#dependencies)
 
 ## API
-create a new instace of built with a [`config object`](#configuration-options)
+create a new instace of built 
 ~~~ Javascript
 var bilt = require('bilt');
-var configObject = {};
-var myProject = bilt(configObject);
+var myProject = bilt();
 ~~~
 
 `bilt.require(paths, callback)` require paths and callback in-order as arguments.
@@ -97,14 +96,13 @@ define({
 
 ## path resoultion
 all paths are relative to the script calling `require` or `build`. a path to a module is resolved with the following process:
- 1. `evaluate plugins` for each plugin specified in the path, call its `normalize` to determine the final pathof the module.
- 2. `paths rewrite` if the path has an entry in the [configuration options](#configuration-options) rewrite the path accordingly.
- 3. `platform check` if a `nodePath` is specified and the module is to be executed in node, use it.
- 4. `try open localy` check to see if the path exists locally.
- 5. `try open remotely` check to see if it can be loaded from a remote server;
- 6. `catch resolve again` if path is not found start at step `2` and try to re-resolve it. (this is required if references are multiple levels deep. not that you should do that). continue re-resolving untill it creates a circular reference.
- 7. `look in node_modules` if all other resolution has failed, look for the file as if it were the path to a node module.
- 8. `resoultion failed` path was not found, throw that error
+ 1. `paths rewrite` if the path has an entry in the [configuration options](#configuration-options) rewrite the path accordingly.
+ 2. `platform check` if a `nodePath` is specified and the module is to be executed in node, use it.
+ 3. `try open localy` check to see if the path exists locally.
+ 4. `try open remotely` check to see if it can be loaded from a remote server;
+ 5. `catch resolve again` if path is not found start at step `2` and try to re-resolve it. (this is required if references are multiple levels deep. not that you should do that). continue re-resolving untill it creates a circular reference.
+ 6. `look in node_modules` if all other resolution has failed, look for the file as if it were the path to a node module.
+ 7. `resoultion failed` path was not found, throw that error
 
 ## compatability
 bilt can include non standard modules:
@@ -114,15 +112,15 @@ bilt can include non standard modules:
 
 ## configuration options
 passed as an object with *any* of the following properties:
- - `paths` object of path-specific options:
-   - `source` path from which to load module.
-   - `deps` array of paths the module is dependent on.
-   - `export` specify what variable to export for standard javascript files.
-   - `amd` string of amd module to export from file
-   - `nodePath` specify separate path to require instead when executing in the node environment
-   - `minify` bool if to minify just this module
-   - *examples*
-     
+ - `deps` array of paths the module is dependent on.
+ - `export` specify what variable to export for standard javascript files.
+ - `amd` string of amd module to export from file
+ - `minify` bool if to minify just this module
+ - `paths` object of mapping paths to their sources and/or extra options:
+  - `source` path from which to load module.
+  - `nodePath` specify separate path to require instead when executing in the node environment
+ - *examples*
+
       ~~~ Javascript
       //source only
       'module-alias' : './module.js'
@@ -134,8 +132,6 @@ passed as an object with *any* of the following properties:
         export : '$'
       }
       ~~~
- - `noMinify` boolean, determines if to use minification in build, if false all modules will be minified regardless of their settings
- 
 
 ## plugins
 plugins filter the module being required. plugins are prepended to a path in a require call like so: `path_to_plugin.js!my_module.js`. plugins are simply modules (an object) with *any* of the three optional properties defined as in this contrived example:
@@ -153,9 +149,8 @@ define({
   }
 })
 ~~~
- - `normalize` a function that is passed the path of the module to be required and returns its new value, as desired
  - `transform` run always in node, takes in raw string from the loaded file and returns the javascript to be evaluated by bilt.
- - `init` run every time the module is required, modifies its value
+ - `init` run every time the module is required, modifies its value. runs in the environment of the child module.
 
 example usage:
 ~~~ 
