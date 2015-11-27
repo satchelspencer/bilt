@@ -1,10 +1,9 @@
 # bilt
 javascript module loader/build tool for briding the gap between server and client side
- - [`api`](#API) 
+ - [`api`](#api) 
  - [`defining modules`](#module-definition)
- - [`factory modules`](#factory-modules)
  - [`module dependencies`](#module-dependencies)
- - [`path resolution`](#path-resolution)
+ - [`path resolution`](#path-resoultion)
  - [`compatability`](#compatability)
  - [`configuration`](#configuration-options)
  - [`plugins`](#plugins)
@@ -54,15 +53,6 @@ define({
 ~~~ Javascript
 //not sure why you would do this
 define('im a string');
-~~~
-
-## factory modules
-you **can** make a module behave like a factory bu defining it with the `factory` function. It will be used to build the value of the module **once**. The value passed to `factory` must be a function.
-~~~ Javascript
-factory(function(){
-  var something = require('something');
-  return something+5;
-});
 ~~~
 
 ## module dependencies 
@@ -116,6 +106,7 @@ passed as an object with *any* of the following properties:
  - `export` specify what variable to export for standard javascript files.
  - `amd` string of amd module to export from file
  - `minify` bool if to minify just this module
+ - `factory` the module must be a function, called once on first require. defines returned value
  - `paths` object of mapping paths to their sources and/or extra options:
   - `source` path from which to load module.
   - `nodePath` specify separate path to require instead when executing in the node environment
