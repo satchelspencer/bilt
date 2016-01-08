@@ -19,7 +19,7 @@ module.exports = function(config){
 	config.context = config.context||[];
 
 	var modules = {};
-	var defineJs = fs.readFileSync(nodePath.join(__dirname, 'lib/define.js'));
+	var defineJs = fs.readFileSync(nodePath.join(__dirname, 'lib/define.js'), 'utf8');
 
 	function resolveNodePath(path){
 		var traveler = module.parent;
@@ -109,6 +109,7 @@ module.exports = function(config){
 				visited[isBuild?'build':'require'].push(traceDepPath); //add er to donesies
 				var pluginTrace = JSON.parse(JSON.stringify(traceConfig));
 				pluginTrace.deps = plugins;
+				pluginTrace.verbose = false;
 				bilt.require(pluginTrace, function(e, pluginModules){
 					if(e) traceDepComplete(e);
 					else{
@@ -153,13 +154,13 @@ module.exports = function(config){
 												if(child.name == 'define') child.name = 'amd';
 											});
 											parse = esprima.parse('define({factory : true}, function(){return (function(){amdModules = {};'+escodegen.generate(parse)+' return amdModules["'+ownConfig.amd+'"]})()});');
-										}
+										} //ACCOUNT FOR RAW? typewatch.js
 										eswalk(parse, function(child){
 											if(child.type == 'CallExpression' && child.callee.name == 'define'){
 												/* 2 args means inline config, remove and extend into ownConfig */
 												if(child.arguments.length == 2){
 													var inlineConfig = eval('('+escodegen.generate(child.arguments.shift())+')');
-													if(_.isArray(inlineConfig)) inlineConfig = {deps : _.uniq(ownConfig.deps.concat(inlineConfig))};										
+													if(_.isArray(inlineConfig) && !ownConfig.export) inlineConfig = {deps : _.uniq(ownConfig.deps.concat(inlineConfig))};										
 													extendConfigs(ownConfig, inlineConfig); //inherit to ownConfig
 													extendConfigs(newTraceConfig, ownConfig);
 												}
@@ -231,8 +232,6 @@ module.exports = function(config){
 	}
 
 	var bilt = {
-		waiting : {},
-		complete : [],
 		modules : {},
 		require : function(requireConfig, callback){
 			function nodeRequire(path){
@@ -241,33 +240,38 @@ module.exports = function(config){
 			var ouputPaths = _.map(requireConfig.deps, function(path){
 				return normalize(path, requireConfig);
 			});
+			eval(defineJs);
+			requireConfig.deps = _.difference(requireConfig.deps, _.keys(bilt.modules));
+			if(requireConfig.verbose) console.log('Require:', requireConfig.deps);
 			trace(requireConfig, function(path, js){
+				if(requireConfig.verbose) console.log(' - ', path);
 				function browser(){
 					return null;
 				}
 				function node(v){
 					return v;
 				}
-				eval(defineJs+js);
+				eval(js);
 			}, function(e, loaded){
-				setTimeout(function(){
+				waitFor(ouputPaths, function(){
 					callback(e, _.mapObject(_.pick(bilt.modules, ouputPaths), function(val){
-					return val.value;
-				}));
-				}, 100)
-					
+						return val.value;
+					}));
+				})					
 			})
 		},
 		build : function(buildConfig, init, callback){
+			if(buildConfig.verbose) console.log('Build:', buildConfig.deps);
 			var output = '';
 			trace(buildConfig, function(path, js){
+				if(buildConfig.verbose) console.log(' - ', _.last(path.split('!')));
 				if(js.length) output += js+'\n\n'; 
 			}, function(e, loaded){
 				/* if no problems include the minified client lib */
 				if(e) callback(e);
 				else fs.readFile(nodePath.join(__dirname, 'lib/client.js'), 'utf8', function(e, require){
 					require = defineJs+'\n'+require;
-					//require = uglify.minify(require, {fromString: true}).code; //minify it
+					require = uglify.minify(require, {fromString: true}).code; //minify it
 					var initDeps = JSON.stringify(_.map(buildConfig.deps, function(spath){
 						return normalize(spath, buildConfig, true);
 					}));
