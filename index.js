@@ -2,7 +2,6 @@ var fs = require('fs-extra');
 var nodePath = require('path');
 var async = require('async');
 var checksum = require('checksum');
-var findRequires = require('find-requires');
 var request = require('request');
 var _ = require('underscore');
 var uglify = require('uglify-js');
@@ -278,7 +277,6 @@ module.exports = function(config){
 			});
 			eval(defineJs);
 			requireConfig.deps = _.difference(requireConfig.deps, _.keys(bilt.modules));
-			if(requireConfig.verbose) console.log('Require:', requireConfig.deps);
 			if(!internal) cacheInit(requireConfig);
 			trace(requireConfig, function(path, js){
 				function browser(){
@@ -298,7 +296,6 @@ module.exports = function(config){
 			}, false)
 		},
 		build : function(buildConfig, init, callback){
-			if(buildConfig.verbose) console.log('Build:', buildConfig.deps);
 			var output = '';
 			cacheInit(buildConfig);
 			trace(buildConfig, function(path, js){
