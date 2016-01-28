@@ -1,7 +1,7 @@
 var fs = require('fs-extra');
 var nodePath = require('path');
 var async = require('async');
-var checksum = require('checksum');
+var crypto = require('crypto')
 var request = require('request');
 var _ = require('underscore');
 var uglify = require('uglify-js');
@@ -137,7 +137,7 @@ module.exports = function(config){
 							if(e) traceDepComplete('failed to open: '+filePath);
 							else{
 								/* check against cache */
-								var check = checksum(raw+JSON.stringify(traceConfig));
+								var check = crypto.createHash('md5').update(raw+JSON.stringify(traceConfig)).digest('hex');
 								var cached = visited.cache[check];
 								if(cached) ready(cached.config, cached.js, cached.ownConfig, check);
 								else{
