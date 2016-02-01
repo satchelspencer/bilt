@@ -134,7 +134,7 @@ module.exports = function(config){
 					else{
 						var pluginPrefix = _.keys(pluginModules).concat('').join('!');
 						open(filePath, function(e, raw){
-							if(e) traceDepComplete('failed to open: '+filePath);
+							if(e) traceDepComplete('failed to open: '+filePath, traceConfig.context);
 							else{
 								/* check against cache */
 								var check = crypto.createHash('md5').update(raw+JSON.stringify(traceConfig)).digest('hex');
@@ -213,7 +213,8 @@ module.exports = function(config){
 													child.type == 'CallExpression' &&
 													child.callee.name == 'require' &&
 													child.arguments[0] &&
-													child.arguments[0].type == 'Literal'
+													child.arguments[0].type == 'Literal' && 
+													!ownConfig.export
 												){ //find all our deps
 													var dep = child.arguments[0].value
 													ownConfig.deps = _.uniq(ownConfig.deps.concat(dep));
