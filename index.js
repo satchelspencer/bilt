@@ -139,7 +139,7 @@ module.exports = function(config){
 								/* check against cache */
 								var check = crypto.createHash('md5').update(raw+JSON.stringify(traceConfig)).digest('hex');
 								var cached = visited.cache[check];
-								if(cached) ready(cached.config, cached.js, cached.ownConfig, check);
+								if(cached) ready(traceConfig, cached.js, cached.ownConfig, check);
 								else{
 									console.log('-', filePath);
 									/* transform raw by plugins */
@@ -250,7 +250,6 @@ module.exports = function(config){
 
 						function ready(newTraceConfig, js, ownConfig, check){
 							visited.newcache[check] = {
-								config : newTraceConfig,
 								js : js,
 								ownConfig : ownConfig
 							}
