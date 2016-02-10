@@ -5,14 +5,15 @@
   "author": "Satchel Spencer",
   "dependencies": {
     "async": "~1.2.0",
-    "underscore": "~1.8.3",
-    "request": "~2.61.0",
-    "uglify-js": "~2.4.24",
     "escodegen": "~1.7.0",
     "esprima": "~2.6.0",
     "esprima-walk": "~0.1.0",
+    "fs-extra": "^0.26.5",
+    "jetty": "^0.2.1",
     "parent-require": "~1.0.0",
+    "request": "~2.61.0",
     "require-resolve": "0.0.2",
-    "fs-extra": "^0.26.5"
+    "uglify-js": "~2.4.24",
+    "underscore": "~1.8.3"
   }
 }
