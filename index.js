@@ -32,31 +32,29 @@ module.exports = function(config){
 	}
 
 	function normalize(path, config, isBuild){
-		var parts = path.split('!');
-		function n(path, context){
-			if(_.contains(context, path)) return path; //no new info on iteration. return
-			else context.push(path);
-			/* normalize configured aliases */
-			var pathConfig = config.paths[path];
-			if(pathConfig){
-				if(_.isString(pathConfig)) path = pathConfig;
-				else{ //if build, use node
-					if(pathConfig.source) path = pathConfig.source;
-					if(!isBuild && pathConfig.nodePath) path = pathConfig.nodePath;
+		function n(fpath, context){
+			if(_.contains(context, fpath)) return fpath; //no new info on iteration. return
+			else context.push(fpath);
+			var parts = fpath.split('!');
+			return _.map(parts, function(path){
+				/* normalize configured aliases */
+				var pathConfig = config.paths[path];
+				if(pathConfig){
+					if(_.isString(pathConfig)) path = pathConfig;
+					else{ //if build, use node
+						if(pathConfig.source) path = pathConfig.source;
+						if(!isBuild && pathConfig.nodePath) path = pathConfig.nodePath;
+					}
 				}
-			}
-			/* normalize relative path */
-			if(path.match(/^\.\//) && config.context.length){
-				path = nodePath.join(nodePath.dirname(_.last(_.last(config.context).split('!'))), path);
-			}
-			path = resolveNodePath(path)||path; //if available resolve node path
-			return n(path, context);
+				/* normalize relative path */
+				if(path.match(/^\.\//) && config.context.length){
+					path = nodePath.join(nodePath.dirname(_.last(_.last(config.context).split('!'))), path);
+				}
+				path = resolveNodePath(path)||path; //if available resolve node path
+				return n(path, context);
+			}).join('!');
 		}
-		/* normalize each part individually */
-		return _.map(parts, function(part){
-			return n(part, []);
-		}).join('!');
-		
+		return n(path, []);		
 	}
 
 	/* oversimplified, works for now */
@@ -133,6 +131,7 @@ module.exports = function(config){
 					if(e) traceDepComplete(e);
 					else{
 						var pluginPrefix = _.keys(pluginModules).concat('').join('!');
+						var fullPath = pluginPrefix+filePath;
 						open(filePath, function(e, raw){
 							if(e) traceDepComplete('failed to open: '+filePath, traceConfig.context);
 							else{
@@ -141,11 +140,11 @@ module.exports = function(config){
 								var cached = visited.cache[check];
 								if(cached) ready(cached.config, cached.js, cached.ownConfig, check);
 								else{
-									console.log('-', filePath);
+									console.log(' - ', filePath);
 									/* transform raw by plugins */
 									async.reduce(_.keys(pluginModules), raw, function(memo, pluginPath, transformDone){
 										var transform = pluginModules[pluginPath].transform||pluginModules[pluginPath];
-										if(_.isFunction(transform)) transform(memo, filePath, transformDone);
+										if(_.isFunction(transform)) transform(memo, filePath, normalizedConfigs[fullPath]||{}, transformDone); //pass in config
 										else transformDone(null, memo);
 									}, function(e, raw){
 										filePath = pluginPrefix+filePath; //add plugins back to filename
