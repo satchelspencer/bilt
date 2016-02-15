@@ -9,7 +9,6 @@
     "esprima": "~2.6.0",
     "esprima-walk": "~0.1.0",
     "fs-extra": "^0.26.5",
-    "jetty": "^0.2.1",
     "parent-require": "~1.0.0",
     "request": "~2.61.0",
     "require-resolve": "0.0.2",
