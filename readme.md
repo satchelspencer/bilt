@@ -98,13 +98,11 @@ all paths are relative to the script calling `require` or `build`. a path to a m
 bilt can include non standard modules:
  - `raw javascript` using the `export` config option, built will evaluate the script in a closure and return the global variable as defined.
  - `node modules` in any bilt module, calls to `nodeRequire` will load the node module relative to the parent as `require` would in a commonJS module.
- - `AMD` using the `amd` config option, specify the name of the defined amd module to be returned. Note, this is not a replacement for requireJS and will not resolve paths or load dependencies of the amd module. It is intended for loading completed builds for an external dependancy.
 
 ## configuration options
 passed as an object with *any* of the following properties:
  - `deps` array of paths the module is dependent on.
  - `export` specify what variable to export for standard javascript files.
- - `amd` string of amd module to export from file
  - `minify` bool if to minify just this module
  - `factory` the module must be a function, called once on first require. defines returned value
  - `paths` object of mapping paths to their sources and/or extra options:

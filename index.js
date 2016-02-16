@@ -171,13 +171,6 @@ module.exports = function(config){
 													return exp?"var "+exp+" = require('"+normOwnDep+"');":'';
 												}).join('\n');
 												parse = esprima.parse('define({factory : true}, function(){'+exportDeps+'\n'+escodegen.generate(parse)+'\n return '+ownConfig.export+';});');
-											}else if(ownConfig.amd){
-												/* compatabilize, replace define with amd */
-												eswalk(parse, function(child){
-													if(child.callee && child.callee.name == 'define') child.callee.name = 'amd';
-													if(child.name == 'define') child.name = 'amd';
-												});
-												parse = esprima.parse('define({factory : true}, function(){return (function(){amdModules = {};'+escodegen.generate(parse)+' return amdModules["'+ownConfig.amd+'"]})()});');
 											}
 											eswalk(parse, function(child){
 												if(child.type == 'CallExpression' && child.callee.name == 'define'){
@@ -271,6 +264,9 @@ module.exports = function(config){
 		require : function(requireConfig, callback, internal){
 			function nodeRequire(path){
 				return prequire(path);
+			}
+			function nodeResolve(path){
+				return resolveNodePath(path);
 			}
 			var ouputPaths = _.map(requireConfig.deps, function(path){
 				return normalize(path, requireConfig);
