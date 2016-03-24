@@ -299,7 +299,7 @@ module.exports = function(config){
 			var output = '';
 			cacheInit(buildConfig);
 			trace(buildConfig, function(path, js){
-				if(js.length) output += js+'\n\n'; 
+				if(js.length) output += js.replace(/<\/script>/g, '<\\\/script>')+'\n\n'; 
 			}, function(e, loaded){
 				cacheDone();
 				/* if no problems include the minified client lib */
