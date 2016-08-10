@@ -82,6 +82,8 @@ module.exports = function(config){
 	var visited = {
 		build : [],
 		require : [],
+		cache : {},
+		newcache : {}
 	};
 
 	function cacheInit(config){
